@@ -24,6 +24,14 @@ The voice pipeline and the only service that talks to the caller. Also the only 
 | in | stream `session.create`, stream `session.cancel`; WebRTC media from `demo-web` |
 | out | stream `session.ready`; key `agent:capacity`; tool calls to `core-api` |
 
+## Run
+
+```
+uv run uvicorn sentinel_agent.main:app --port 8003
+```
+
+`/health` and `/metrics` (Prometheus text) are live; everything else is scaffold.
+
 ## Status
 
 Scaffold only. Built in [PLAN](../../docs/PLAN.md) 1.1 (echo pipeline), 2.1–2.7 (conversation, persona, redaction), 3.1–3.2 / 3.7–3.8 / 3.11 (state machine, session lifecycle, token, judge).

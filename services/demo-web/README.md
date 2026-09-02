@@ -22,6 +22,10 @@ Public sandbox front end: the fake checkout, the voice widget (mic or text), and
 | in | SSE `core-api/events?visitor_id` → `ring`, `session_ready`, `sandbox_busy` (replayed via `Last-Event-ID`) |
 | both | WebRTC media ↔ `agent`, authorised by the `call_id`-bound token |
 
+## Run
+
+No runtime yet — the Next.js app is created in [PLAN](../../docs/PLAN.md) 1.2.
+
 ## Status
 
 Scaffold only. Built in [PLAN](../../docs/PLAN.md) 1.2 (Connect + echo), 3.10 (SSE client + ring UI), 4.1 (checkout page), 4.2 (dashboard).

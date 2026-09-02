@@ -26,6 +26,14 @@ Failure edges it owns: ring timeout / decline → `no_answer` + `XADD session.ca
 | out | stream `session.create`, stream `session.cancel`; pub/sub `ring`, `session_ready`, `sandbox_busy`; `calls` writes to `core-api` |
 | keys | `alert:{id}` (dedupe), `agent:capacity` (counter) |
 
+## Run
+
+```
+uv run uvicorn sentinel_call_orchestrator.main:app --port 8002
+```
+
+`/health` and `/metrics` (Prometheus text) are live; everything else is scaffold.
+
 ## Status
 
 Scaffold only. Built in [PLAN](../../docs/PLAN.md) 3.6.

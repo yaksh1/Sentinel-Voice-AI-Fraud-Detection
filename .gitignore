@@ -12,6 +12,15 @@
 # Dependencies
 node_modules/
 
+# Python (uv.lock is committed on purpose — services are apps, not libraries)
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
 # Build output
 dist/
 build/

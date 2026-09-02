@@ -182,6 +182,12 @@ docs/
   03_state_machine.mermaid          conversation pathway with tool guards
   03b_transition_guard_loop.mermaid LLM proposal → validator → judge → commit
   05_failure_recovery_map.mermaid   every known failure and its recovery
+contracts/                          shared pydantic event contracts (the 7 events)
+db/
+  migrations/001_init.sql           schema — 8 tables, calls.state enum, idempotent
+  seed.sql                          one customer + card, idempotent
+docker-compose.yml                  local Redis 7 (no Postgres — Neon branches serve dev/CI)
+pyproject.toml                      uv workspace root
 services/
   demo-web/                         checkout, voice widget, dashboard (Next.js)
   risk-engine/                      rule evaluation → fraud.alert (FastAPI)

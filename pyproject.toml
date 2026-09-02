@@ -1,0 +1,39 @@
+# Workspace root. Not a package itself — it exists so `uv sync` resolves every
+# service and the shared contracts package into one lockfile and one venv.
+[project]
+name = "sentinel"
+version = "0.1.0"
+description = "Event-driven voice AI fraud detection"
+requires-python = ">=3.12"
+dependencies = [
+    "sentinel-contracts",
+    "sentinel-core-api",
+    "sentinel-risk-engine",
+    "sentinel-call-orchestrator",
+    "sentinel-agent",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = [
+    "contracts",
+    "services/core-api",
+    "services/risk-engine",
+    "services/call-orchestrator",
+    "services/agent",
+]
+
+[tool.uv.sources]
+sentinel-contracts = { workspace = true }
+sentinel-core-api = { workspace = true }
+sentinel-risk-engine = { workspace = true }
+sentinel-call-orchestrator = { workspace = true }
+sentinel-agent = { workspace = true }
+
+[dependency-groups]
+dev = ["pytest>=8.0", "httpx>=0.27"]
+
+[tool.pytest.ini_options]
+testpaths = ["contracts/tests"]

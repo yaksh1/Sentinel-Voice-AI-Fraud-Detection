@@ -35,6 +35,14 @@ System of record and the browser's only server-sent-events endpoint. Owns the sc
 | out | SSE to `demo-web`; SQL to Neon; calls `risk-engine` |
 | keys | `conn:{visitor_id}` (registry, TTL), `events:{visitor_id}` (replay buffer) |
 
+## Run
+
+```
+uv run uvicorn sentinel_core_api.main:app --port 8000
+```
+
+`/health` and `/metrics` (Prometheus text) are live; everything else is scaffold.
+
 ## Status
 
 Scaffold only. Built in [PLAN](../../docs/PLAN.md) 0.4 (schema), 2.3 (tools), 3.4 (checkout), 3.5 (SSE + registry), 3.9 (replay buffer).
