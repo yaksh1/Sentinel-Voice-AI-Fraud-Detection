@@ -1,0 +1,33 @@
+flowchart LR
+    subgraph web["demo-web (Next.js)"]
+        CO[Fake checkout]
+        W[Voice widget<br/>WebRTC / text]
+        DB[Live dashboard]
+    end
+
+    API[core-api<br/>FastAPI · SSE]
+    RE[risk-engine<br/>rule-based]
+    R[(Redis<br/>streams · pub/sub · keys)]
+    ORC[call-orchestrator<br/>dedupe · rate-limit · capacity]
+    AG[agent<br/>Pipecat · state machine<br/>Cerebras gpt-oss-120b<br/>warm 1 / max 3]
+    J[Claude Sonnet 5<br/>escalation judge]
+    PG[(Neon Postgres)]
+    OBS[OTel → Prometheus → Grafana]
+
+    CO -->|POST /checkout| API
+    API --> RE
+    RE -->|fraud.alert| R
+    R --> ORC
+    ORC <-->|session.create / session.ready| R
+    R -->|session.create| AG
+    ORC -->|ring · session_ready| R
+    R -->|pub/sub| API
+    API -->|SSE| W
+    API -->|SSE| DB
+    W <-->|WebRTC media| AG
+    AG -.->|escalate: rejected or<br/>irreversible transition| J
+    J -.->|verdict, re-validated| AG
+    AG -->|tool calls| API
+    API --> PG
+    AG -.->|spans| OBS
+    ORC -.->|spans| OBS

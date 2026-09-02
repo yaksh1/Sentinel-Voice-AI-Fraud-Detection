@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "deepgram-docs": {
+      "type": "http",
+      "url": "https://api.dx.deepgram.com/kapa/mcp"
+    },
+    "deepgram": {
+      "type": "stdio",
+      "command": "dg",
+      "args": [
+        "mcp"
+      ],
+      "env": {
+        "DEEPGRAM_API_KEY": "${DEEPGRAM_API_KEY}",
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1"
+      }
+    }
+  }
+}

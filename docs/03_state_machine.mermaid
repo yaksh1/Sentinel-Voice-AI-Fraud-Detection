@@ -1,0 +1,38 @@
+stateDiagram-v2
+    [*] --> consent
+    consent --> verify_identity: consent given
+
+    state verify_identity {
+        [*] --> challenge
+        challenge --> challenge: fail (attempts < 2)
+    }
+    note right of verify_identity
+        tool: verify_challenge(last4, answer)
+        gate: sets verified = true on pass
+    end note
+
+    verify_identity --> present_transaction: verified
+    verify_identity --> escalate: failed twice
+
+    note right of present_transaction
+        tool: lookup_transaction(alert_id)
+    end note
+    present_transaction --> decision: transaction read back
+    decision --> present_transaction: clarifying question
+
+    decision --> action_release: "yes, that was me"
+    decision --> action_block: "no"
+
+    note right of action_release
+        tool: release_hold(txn_id)
+        guard: verified ∧ state = action_release
+    end note
+    note right of action_block
+        tool: block_card_and_reissue(card_id)
+        guard: verified ∧ state = action_block
+    end note
+
+    action_release --> close
+    action_block --> close
+    escalate --> close: escalate_to_analyst(call_id, reason)
+    close --> [*]

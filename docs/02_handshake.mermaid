@@ -1,0 +1,48 @@
+sequenceDiagram
+    autonumber
+    participant B as Browser (demo-web)
+    participant API as core-api (SSE)
+    participant R as Redis
+    participant O as Orchestrator
+    participant A as Agent (warm 1 / max 3)
+
+    B->>API: GET /events?visitor_id (SSE)
+    API->>R: SET conn:{visitor_id} (TTL, heartbeat refresh)
+    B->>API: POST /checkout {visitor_id, amount, merchant}
+    API->>R: XADD fraud.alert {alert_id, txn_id, customer_id}
+    R-->>O: XREADGROUP fraud.alert
+    O->>R: SET NX alert:{id} (dedupe) · rate-limit check
+    O->>R: DECR agent:capacity
+    alt capacity < 0
+        O->>R: INCR agent:capacity
+        O->>R: PUBLISH sandbox_busy
+        R-->>API: sandbox_busy
+        API-->>B: SSE: sandbox_busy
+    else capacity ok
+        O->>O: mint call_id · calls.state = ringing · start 30 s ring timer
+        par ring immediately
+            O->>R: PUBLISH ring {call_id}  ⏱ alert_to_ring_ms
+            R-->>API: ring
+            API-->>B: SSE: ring
+        and pre-warm pipeline
+            O->>R: XADD session.create {call_id, alert_id, customer_id}
+            R-->>A: XREADGROUP session.create
+            A->>A: hand out warm pipeline (or cold-start ≤ cap), stay silent
+            A->>R: XADD session.ready {call_id, session_url, token, expires_at}
+            R-->>O: XREADGROUP session.ready
+            O->>R: PUBLISH session_ready {call_id, session_url, token}
+            R-->>API: session_ready
+            API-->>B: SSE: session_ready
+        end
+        alt visitor answers within 30 s
+            B->>A: WebRTC connect (single-use token bound to call_id)
+            A->>A: validate token · state = consent
+            A-->>B: first TTS: consent line
+            Note over A: agent owns calls.state from here
+        else decline / timeout
+            O->>O: calls.state = no_answer · flag SMS fallback (v1.1)
+            O->>R: XADD session.cancel {call_id}
+            R-->>A: session.cancel → release pipeline
+        end
+    end
+    A->>R: INCR agent:capacity (on call end) · refill warm pool

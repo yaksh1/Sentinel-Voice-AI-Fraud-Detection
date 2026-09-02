@@ -1,0 +1,20 @@
+flowchart TD
+    U[Caller utterance<br/>STT transcript] --> LLM[Cerebras gpt-oss-120b<br/>persona + current state in context]
+    LLM -->|structured output| P["{ reply_text,<br/>proposed_state,<br/>tool_call? }"]
+    P --> V{State machine<br/>validator}
+
+    V -->|transition allowed<br/>and tool guard passes| T[Run tool<br/>write audit row]
+    T --> S[Commit transition<br/>log call_id · from · to · trigger · latency_ms]
+    S --> TTS[Speak reply_text<br/>TTS]
+
+    V -->|no tool, valid state| S
+
+    V -->|not allowed<br/>e.g. action_* without verified| J
+    V -->|allowed but irreversible<br/>action_release / action_block| J[Claude Sonnet 5 judge<br/>transcript + state + violated rule<br/>max 1 per turn]
+
+    J -->|same structured schema| V2{Validator<br/>2nd pass}
+    V2 -->|allowed| T
+    V2 -->|still not allowed| ESC[escalate_to_analyst<br/>polite close]
+    J -.->|timeout / 429<br/>fail closed| ESC
+
+    TTS --> U

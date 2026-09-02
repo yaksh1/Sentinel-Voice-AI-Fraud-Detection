@@ -1,0 +1,54 @@
+# Secrets / local env
+.env
+.env.*
+!.env.example
+
+# Neon local context (contains org/project/branch binding)
+.neon
+
+# Claude Code per-machine settings (shared settings.json stays tracked)
+.claude/settings.local.json
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Caches
+.cache/
+.npm/
+.turbo/
+.parcel-cache/
+coverage/
+
+# Audio artifacts (call recordings / TTS output)
+*.wav
+*.mp3
+*.ogg
+*.flac
+*.webm
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Misc
+*.bak
+*.tmp

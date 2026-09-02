@@ -1,0 +1,24 @@
+flowchart LR
+    subgraph ingest["Ingest"]
+        F1[Duplicate fraud.alert] -->|SET NX alert:id fails| R1[Drop · count dedupe_hit]
+        F2[Customer already called<br/>in last 10 min] -->|rate limit| R2[Drop · count rate_limit_reject]
+    end
+
+    subgraph capacity["Capacity"]
+        F3[agent:capacity would go < 0] -->|INCR back| R3[Publish sandbox_busy<br/>visitor sees retry_after]
+        F4[session.create piles up<br/>stream lag grows] --> R4[Ring timer fires<br/>no_answer · alert flagged]
+    end
+
+    subgraph ring["Ring & connect"]
+        F5[Visitor declines or<br/>30 s timeout] --> R5[calls.state = no_answer<br/>session.cancel → agent<br/>SMS fallback v1.1]
+        F6[SSE drops mid-ring] -->|Last-Event-ID| R6[Replay ring / session_ready<br/>from events:visitor TTL 60 s]
+        F7[WebRTC connect with<br/>bad or reused token] --> R7[Agent rejects<br/>audit row · call unchanged]
+    end
+
+    subgraph incall["In call"]
+        F8[Agent crashes mid-call] --> R8[calls.state = dropped<br/>alert requeued once<br/>unacked stream entry redelivered]
+        F9[Verification fails twice] --> R9[escalate_to_analyst<br/>polite close]
+        F10[Fast model proposes action_*<br/>without verified] --> R10[Validator rejects → Sonnet judge<br/>verdict re-validated · 2nd rejection → escalate]
+        F12[Judge unreachable<br/>Anthropic timeout / 429] --> R12[Fail closed<br/>rejection stands · escalate_to_analyst<br/>never softens to approval]
+        F11[PAN-like string in<br/>transcript or log] --> R11[Regex + Luhn redaction<br/>before persistence]
+    end
