@@ -11,7 +11,7 @@ Running log of what is actually done, verified how, and what got in the way.
 | Phase | Scope | Status |
 |---|---|---|
 | 0 · Bootstrap | 6 tasks (5 P0, 1 P1) | **✅ Complete** — every done-when verified, including the Redis half of 0.3 (B1 resolved) |
-| 1 · Transport skeleton | 5 tasks | **In progress** — 1.1–1.3 ✅ (Safari half of 1.2 deferred to 4.6, B9). **Phase 2 entry gate met** |
+| 1 · Transport skeleton | 5 tasks | **✅ Complete** — all five done; Safari half of 1.2 deferred to 4.6 (B9). **Phase 2 entry gate met** |
 | 2 · First conversation | 7 tasks | Not started |
 | 3 · State machine + pipeline | 11 tasks | Not started |
 | 4 · Demo + observability | 7 tasks | Not started |
@@ -57,8 +57,8 @@ services/*/               4 FastAPI apps with /health and /metrics
 | 1.1 | `agent`: Pipecat pipeline with SmallWebRTC transport, echo processor | P0 | ✅ | 2026-09-02 13:50 | Audio round trip measured, not guessed: `tools/echo_probe.py` sends eight 440 Hz bursts as a real WebRTC peer and times the return. 8/8 echoed, **median 281 ms** (278–283) across two consecutive runs. Confirmed by ear in Chrome on 2026-09-02: the delay was not noticeable, which is the done-when as written. Connect and disconnect both log; the runner cancels on disconnect with no leak | `e16f35a` |
 | 1.2 | `demo-web`: Pipecat JS client, Connect button, mic permission | P0 | ✅ Chrome | 2026-09-02 14:45 | Next.js 16 app; `npm run build`, `tsc --noEmit` and `eslint` all clean. Server side verified without a browser: CORS preflight returns the right `access-control-allow-*` for `http://localhost:3000`, and an aiortc probe speaking RTVI gets `bot-ready` back from `client-ready` — the exact exchange `PipecatClient.connect()` waits on. Chrome confirmed by ear on 2026-09-02: connected, echo heard. Safari deferred to 4.6 (B9) | `d44e69a` |
 | 1.3 | Per-frame timing: `net_ms` per audio frame with a `call_id` | P0 | ✅ | 2026-09-02 14:30 | One probe run produced **1085 per-frame TRACE lines** and 8 INFO summaries, all carrying the same `call_id` as the connect and disconnect lines. `frames=101` per 2 s confirms 20 ms frames at 50 fps. `net_ms` p50 1.7, p95 9.1, max 16.3 | `e993950` |
-| 1.4 | Text transport through the same pipeline | P1 | Not started | — | — | — |
-| 1.5 | Decide: text mode reuses `session.create` | P1 | Not started | — | — | — |
+| 1.4 | Text transport through the same pipeline | P1 | ✅ | 2026-09-02 14:40 | Typed text echoes through the *running* pipeline, not a parallel one: probe sends RTVI `client-message {t: text-input}` and gets `server-message {type: text-echo, text: hello}` back, with `echo: text in 'hello'` logged from `EchoProcessor` in between. Re-run with **no audio track at all** — the declined-mic case — and it still works | *(this commit)* |
+| 1.5 | Decide: text mode reuses `session.create` | P1 | ✅ | 2026-09-02 14:45 | Decision paragraph appended to [BRIEF §10](BRIEF.md) and the row closed in [ARCHITECTURE §14](ARCHITECTURE.md): **reuse**. 1.4 made it near-free, so the argument reduces to not building the authority model twice | *(this commit)* |
 
 ### Reading the 281 ms
 
@@ -135,6 +135,29 @@ seconds and 1085 frames the p50 stayed near 1.7 ms and the max never passed
 quietly filling. That places essentially none of the ~281 ms round trip on the
 inbound path — it is opus, the jitter buffers at both ends, and output pacing.
 Worth knowing before Phase 2 starts adding STT to this same path.
+
+### What 1.4 and 1.5 produced
+
+Text mode needed no new transport, no new pipeline and no new endpoint — three
+lines in `EchoProcessor` and a text box in the widget:
+
+```
+services/agent/.../echo.py            RTVIClientMessageFrame in -> RTVIServerMessageFrame out
+services/demo-web/app/voice-widget.tsx  a text box and a transcript list
+```
+
+`PipelineWorker` prepends its `RTVIProcessor` *above* the whole pipeline
+(`processors = [self._rtvi, pipeline]`), so a typed message is already a frame
+travelling the same path the audio takes. Text is not a second mode; it is the
+same call with a different input frame. That is what made 1.5 easy to decide —
+the reuse it was weighing turned out to cost nothing, so the only question left
+was whether to implement the state machine, tool guards and judge escalation
+twice. See [BRIEF §10](BRIEF.md).
+
+The check worth keeping: an offer carrying **only a data channel** — no audio
+track, the visitor who declined the microphone — still completes the RTVI
+handshake and echoes typed text. Pipecat logs `Audio transceiver not found` as
+a warning and carries on.
 
 ---
 
@@ -252,6 +275,7 @@ Worth knowing before Phase 2 starts adding STT to this same path.
 - **Restarting the agent:** free port 8003 first and check the log for `10048` before believing any
   measurement taken against it (B7). The probe's `pc_id` should end in `#0` on a fresh process.
 - **`/dev` is a stopgap.** It exists so 1.1 could be checked without 1.2; `demo-web` replaces it.
+  It has no text box — that lives only in `demo-web` (1.4).
 - **Running the demo:** agent on 8003 and `npm run dev` in `services/demo-web` for 3000. Both are
   needed; Connect fails with a CORS or connection error if the agent is down.
 - **demo-web is not in CI.** The `test` job is Python only, so a TypeScript or build break in

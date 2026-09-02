@@ -9,13 +9,21 @@ import { useEffect, useRef, useState } from "react";
 const AGENT_OFFER_URL =
   process.env.NEXT_PUBLIC_AGENT_OFFER_URL ?? "http://localhost:8003/api/offer";
 
+// Must match sentinel_agent/echo.py.
+const TEXT_INPUT = "text-input";
+const TEXT_ECHO = "text-echo";
+
 const BUSY: TransportState[] = ["initializing", "connecting", "authenticating"];
+
+type Line = { from: "you" | "agent"; text: string };
 
 export function VoiceWidget() {
   const client = useRef<PipecatClient | null>(null);
   const audio = useRef<HTMLAudioElement>(null);
   const [state, setState] = useState<TransportState>("disconnected");
   const [error, setError] = useState<string | null>(null);
+  const [lines, setLines] = useState<Line[]>([]);
+  const [draft, setDraft] = useState("");
 
   useEffect(() => {
     const pcClient = new PipecatClient({
@@ -31,6 +39,10 @@ export function VoiceWidget() {
         onTrackStarted: (track, participant) => {
           if (participant?.local || track.kind !== "audio") return;
           if (audio.current) audio.current.srcObject = new MediaStream([track]);
+        },
+        onServerMessage: (data) => {
+          if (data?.type !== TEXT_ECHO) return;
+          setLines((prev) => [...prev, { from: "agent", text: String(data.text) }]);
         },
       },
     });
@@ -61,12 +73,23 @@ export function VoiceWidget() {
     }
   }
 
+  function send(event: React.FormEvent) {
+    event.preventDefault();
+    const text = draft.trim();
+    if (!text || !connected) return;
+    // Same pipeline as the audio: this leaves over the RTVI data channel and
+    // reaches the echo processor as a frame, exactly as a transcript would.
+    client.current?.sendClientMessage(TEXT_INPUT, { text });
+    setLines((prev) => [...prev, { from: "you", text }]);
+    setDraft("");
+  }
+
   return (
-    <section className="widget">
+    <section>
       <h1>Sentinel</h1>
       <p className="sub">
-        Phase 1: the agent echoes you back. Wear headphones — on speakers the echo
-        feeds back on itself.
+        Phase 1: the agent echoes you back, by voice or by typing. Wear headphones
+        — on speakers the echo feeds back on itself.
       </p>
 
       <button onClick={toggle} disabled={busy}>
@@ -77,6 +100,30 @@ export function VoiceWidget() {
         <dt>Status</dt>
         <dd>{state}</dd>
       </dl>
+
+      <form onSubmit={send}>
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={connected ? "Type instead…" : "Connect first"}
+          disabled={!connected}
+          aria-label="Message"
+        />
+        <button type="submit" disabled={!connected || !draft.trim()}>
+          Send
+        </button>
+      </form>
+
+      {lines.length > 0 && (
+        <ol className="lines">
+          {lines.map((line, i) => (
+            <li key={i} className={line.from}>
+              <span className="who">{line.from}</span>
+              {line.text}
+            </li>
+          ))}
+        </ol>
+      )}
 
       {error && <p className="error">{error}</p>}
 

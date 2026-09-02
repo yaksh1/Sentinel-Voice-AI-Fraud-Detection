@@ -45,7 +45,8 @@ follows is not subject to CORS.
 
 ## Status
 
-Connect works and the agent echoes you back ([PLAN](../../docs/PLAN.md) 1.2).
-`app/voice-widget.tsx` is the whole of it — a Connect button, mic permission,
-and an `<audio>` element for the returning track. Still to come: 3.10 (SSE
-client + ring UI), 4.1 (checkout page), 4.2 (dashboard).
+Connect works and the agent echoes you back, by voice ([PLAN](../../docs/PLAN.md)
+1.2) or by typing (1.4). `app/voice-widget.tsx` is the whole of it — a Connect
+button, mic permission, an `<audio>` element for the returning track, and a text
+box that sends over the same WebRTC data channel. Still to come: 3.10 (SSE client
++ ring UI), 4.1 (checkout page), 4.2 (dashboard).

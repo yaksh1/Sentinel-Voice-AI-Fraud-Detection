@@ -13,6 +13,7 @@ from pipecat.frames.frames import Frame, InputAudioRawFrame, OutputAudioRawFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frameworks.rtvi import RTVIClientMessageFrame, RTVIServerMessageFrame
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
@@ -20,20 +21,32 @@ from pipecat.workers.runner import WorkerRunner
 
 from sentinel_agent.timing import FrameTimingProcessor
 
+# The RTVI message types text mode speaks. The client sends TEXT_INPUT; the
+# reply comes back as a server message tagged TEXT_ECHO.
+TEXT_INPUT = "text-input"
+TEXT_ECHO = "text-echo"
+
 
 class EchoProcessor(FrameProcessor):
-    """Re-emit microphone audio as speaker audio.
+    """Re-emit whatever the caller sent: microphone audio, or typed text.
 
-    Not a no-op, despite appearances. The input transport emits
-    `InputAudioRawFrame` (a SystemFrame) and the output transport only ever
-    plays `OutputAudioRawFrame`, so a bare input -> output pipeline connects
-    and stays silent. Re-wrapping the same PCM bytes in the output frame *is*
-    the echo. The original frame is forwarded as well, so the processor stays
-    non-destructive for anything added downstream later.
+    The audio half is not a no-op, despite appearances. The input transport
+    emits `InputAudioRawFrame` (a SystemFrame) and the output transport only
+    ever plays `OutputAudioRawFrame`, so a bare input -> output pipeline
+    connects and stays silent. Re-wrapping the same PCM bytes in the output
+    frame *is* the echo. The original frame is forwarded as well, so the
+    processor stays non-destructive for anything added downstream later.
+
+    The text half (PLAN 1.4) needs no second transport and no second pipeline.
+    `PipelineWorker` prepends its `RTVIProcessor` above everything here, so a
+    client message arrives as an `RTVIClientMessageFrame` travelling the same
+    path the audio does, and the reply leaves as an `RTVIServerMessageFrame`.
+    Phase 2 replaces this class with STT -> LLM -> TTS, and text keeps working
+    because it enters the pipeline at the same point a transcript would.
     """
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Forward every frame; additionally mirror input audio to the output."""
+        """Forward every frame; additionally echo input audio and typed text."""
         await super().process_frame(frame, direction)
 
         await self.push_frame(frame, direction)
@@ -46,6 +59,10 @@ class EchoProcessor(FrameProcessor):
                     num_channels=frame.num_channels,
                 )
             )
+        elif isinstance(frame, RTVIClientMessageFrame) and frame.type == TEXT_INPUT:
+            text = (frame.data or {}).get("text", "")
+            logger.info("echo: text in {!r}", text)
+            await self.push_frame(RTVIServerMessageFrame(data={"type": TEXT_ECHO, "text": text}))
 
 
 async def run_echo_bot(connection: SmallWebRTCConnection, call_id: str | None = None) -> None:

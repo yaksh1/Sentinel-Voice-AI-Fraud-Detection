@@ -60,3 +60,41 @@ dd {
     color: #ff6b81;
   }
 }
+
+form {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+}
+
+input {
+  font: inherit;
+  flex: 1;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 0.4rem;
+  background: transparent;
+  color: inherit;
+}
+
+input:disabled {
+  opacity: 0.5;
+}
+
+.lines {
+  list-style: none;
+  padding: 0;
+  margin: 1.25rem 0 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.lines .who {
+  display: inline-block;
+  width: 4rem;
+  opacity: 0.55;
+}
+
+.lines .agent {
+  font-weight: 600;
+}

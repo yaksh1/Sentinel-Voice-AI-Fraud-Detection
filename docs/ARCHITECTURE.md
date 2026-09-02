@@ -485,7 +485,7 @@ Each has a task that closes it; none blocks the phase it sits in.
 | Judge trigger policy — do both triggers earn their latency? | Escalation is the largest single addition to turn latency | [PLAN](PLAN.md) 2.4 |
 | Holding line during the judge round-trip? | Only needed if 2.4 measures the round-trip above the perceptible threshold | [PLAN](PLAN.md) 2.4 |
 | Where the state machine object lives inside the Pipecat pipeline, and the exact structured-output schema | Determines whether the validator can see every proposal | [PLAN](PLAN.md) 2.7 |
-| Text mode: reuse the `session.create` path with a text transport, or bypass WebRTC? | Reuse keeps one code path and one set of metrics; bypass is simpler | [PLAN](PLAN.md) 1.5 |
+| ~~Text mode: reuse the `session.create` path, or bypass WebRTC?~~ | **Resolved 2026-09-02: reuse.** Typed text enters the running pipeline as an RTVI client message, so there is no second transport and no second code path — see [BRIEF §10](BRIEF.md) | closed by [PLAN](PLAN.md) 1.4–1.5 |
 | SSE heartbeat interval and `conn:{visitor_id}` TTL | Too long leaks dead registry entries; too short is chatty. Leaning 15 s / 45 s | [PLAN](PLAN.md) 3.5 |
 | Service hosting — Fly.io vs. Railway | Deploy target for four Python services | [PLAN](PLAN.md) 4.6 |
 | Rate-limit key naming and window implementation | Fixed vs. sliding window changes burst behaviour at the boundary | [PLAN](PLAN.md) 3.6 |
