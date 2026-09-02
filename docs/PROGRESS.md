@@ -11,13 +11,13 @@ Running log of what is actually done, verified how, and what got in the way.
 | Phase | Scope | Status |
 |---|---|---|
 | 0 · Bootstrap | 6 tasks (5 P0, 1 P1) | **✅ Complete** — every done-when verified, including the Redis half of 0.3 (B1 resolved) |
-| 1 · Transport skeleton | 5 tasks | Not started — **entry gate satisfied** |
+| 1 · Transport skeleton | 5 tasks | **In progress** — 1.1 ✅ |
 | 2 · First conversation | 7 tasks | Not started |
 | 3 · State machine + pipeline | 11 tasks | Not started |
 | 4 · Demo + observability | 7 tasks | Not started |
 | 5 · Hardening tests | 5 tasks | Not started |
 
-**Phase 1 entry gate — "Phase 0 P0 done": met** (2026-09-02). Nothing outstanding; 1.1 can start.
+**Phase 1 entry gate — "Phase 0 P0 done": met** (2026-09-02). Nothing outstanding.
 
 ---
 
@@ -45,6 +45,53 @@ contracts/                sentinel_contracts: 7 pydantic models + stream and cha
 pyproject.toml            uv workspace: contracts + 4 services, one lockfile
 services/*/               4 FastAPI apps with /health and /metrics
 ```
+
+---
+
+## Phase 1 — Transport skeleton
+
+| # | Task | Pri | Status | Verified | Evidence | Commit |
+|---|---|---|---|---|---|---|
+| 1.1 | `agent`: Pipecat pipeline with SmallWebRTC transport, echo processor | P0 | ✅ | 2026-09-02 13:50 | Audio round trip measured, not guessed: `tools/echo_probe.py` sends eight 440 Hz bursts as a real WebRTC peer and times the return. 8/8 echoed, **median 281 ms** (278–283) across two consecutive runs. Connect and disconnect both log; the runner cancels on disconnect with no leak | *(this commit)* |
+| 1.2 | `demo-web`: Pipecat JS client, Connect button, mic permission | P0 | Not started | — | — | — |
+| 1.3 | Per-frame timing: `net_ms` per audio frame with a `call_id` | P0 | Not started | — | — | — |
+| 1.4 | Text transport through the same pipeline | P1 | Not started | — | — | — |
+| 1.5 | Decide: text mode reuses `session.create` | P1 | Not started | — | — | — |
+
+### Reading the 281 ms
+
+The done-when is "you hear yourself with < 300 ms delay", which no one can
+check with a stopwatch, so 1.1 shipped with a probe instead. Three things about
+that number:
+
+- **It is a round trip and an upper bound.** Roughly **160 ms of it is the
+  probe's own aiortc stack** — jitter buffer and opus at both ends of the loop,
+  measured against a bare aiortc relay with no pipeline in it as a control. The
+  pipeline's own contribution is therefore ~120 ms. A browser's WebRTC
+  implementation is better tuned than aiortc's, so what you hear at `/dev`
+  should sit below what the probe prints.
+- **`audio_out_10ms_chunks=2` is a measured change, not a preference.** Stock
+  Pipecat buffers 40 ms of output; halving it moved the median 297 → 281 ms and
+  tightened the spread from 295–311 ms to 278–283 ms.
+  [ARCHITECTURE](ARCHITECTURE.md) budgets 250 ms to network and jitter for both
+  directions combined, so this is worth the two extra flushes per 40 ms.
+- **`audio_out_auto_silence=False` was considered and dropped.** It suits an
+  echo, where audio flows continuously, but Phase 2's bot is silent between
+  utterances and the output track has to keep emitting to hold the stream open.
+
+### What 1.1 produced
+
+```
+services/agent/sentinel_agent/echo.py          EchoProcessor + one runner per connection
+services/agent/sentinel_agent/main.py          /api/offer signalling, /dev page, lifespan cleanup
+services/agent/sentinel_agent/dev_client.html  ~90 lines of vanilla WebRTC, no build step
+services/agent/tools/echo_probe.py             the measurement above, re-runnable
+```
+
+`EchoProcessor` is the only non-obvious part. The input transport emits
+`InputAudioRawFrame` (a `SystemFrame`) and the output transport only ever plays
+`OutputAudioRawFrame`, so `Pipeline([transport.input(), transport.output()])`
+connects and sits there in silence. Re-wrapping the same PCM bytes *is* the echo.
 
 ---
 
@@ -93,6 +140,28 @@ services/*/               4 FastAPI apps with /health and /metrics
 - **Symptom:** `docker compose up -d` failed with `error getting credentials - err: exec: "docker-credential-desktop": executable file not found in %PATH%`. Docker's config sets `credsStore: desktop`, and that helper ships in Docker Desktop's own `resources\bin`.
 - **Resolution:** prepended that directory to `PATH` for the shell rather than editing `~/.docker/config.json` — the config is right, the shell's environment was stale. The installer *does* add the directory to the persistent user PATH, so this only affects shells that were already running when Docker was installed.
 
+### B7 · A dead uvicorn kept serving, and two measurements were quietly wrong · **RESOLVED**
+
+- **Hit:** 2026-09-02 ~13:35, during 1.1 latency tuning.
+- **Symptom:** restarting the agent with `uv run uvicorn ... > log 2>&1 &` after
+  changing a transport parameter produced no change in the measured latency —
+  twice, for two different parameters. The obvious reading was "neither knob
+  does anything", and it was wrong.
+- **Cause:** the old process had not actually died, so each new uvicorn failed
+  with `[Errno 10048] only one usage of each socket address`, logged it, and
+  exited. The port stayed served by the *original* process running the
+  *original* code. Because `>` truncates, the log only ever held the newest
+  (failed) start, and the failure scrolled past under normal-looking output.
+- **Caught by:** the `pc_id` in the probe output. Pipecat numbers connections
+  per process — `SmallWebRTCConnection#4` on what should have been a fresh boot
+  means four connections had already been served by that process.
+- **Resolution:** kill by port before starting (`Get-NetTCPConnection -LocalPort
+  8003 -State Listen`), then assert on two things before trusting a number:
+  `Uvicorn running` present with no `10048` in the log, and `pc_id` ending in
+  `#0`. Re-run under that discipline, `audio_out_10ms_chunks=2` did move the
+  median — 297 → 281 ms.
+- **Worth keeping:** a negative result from an A/B needs proof the B ever ran.
+
 ---
 
 ## Notes for the next session
@@ -102,3 +171,6 @@ services/*/               4 FastAPI apps with /health and /metrics
 - **Ports:** core-api 8000, risk-engine 8001, call-orchestrator 8002, agent 8003 (`.env.example`).
 - **Docker in an old shell:** if `docker` is not found, the shell predates the install — open a new terminal, or `export PATH="$PATH:/c/Users/yaksh/AppData/Local/Programs/DockerDesktop/resources/bin"` (B6).
 - The seeded verification factors are last4 `4242` and city of birth `Porto`, on customer `00000000-…-0001`.
+- **Restarting the agent:** free port 8003 first and check the log for `10048` before believing any
+  measurement taken against it (B7). The probe's `pc_id` should end in `#0` on a fresh process.
+- **`/dev` is a stopgap.** It exists so 1.1 could be checked without 1.2; `demo-web` replaces it.

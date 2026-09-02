@@ -30,8 +30,27 @@ The voice pipeline and the only service that talks to the caller. Also the only 
 uv run uvicorn sentinel_agent.main:app --port 8003
 ```
 
-`/health` and `/metrics` (Prometheus text) are live; everything else is scaffold.
+| Route | What it does |
+|---|---|
+| `GET /health` | Liveness probe |
+| `GET /metrics` | Prometheus text |
+| `POST /api/offer` | WebRTC signalling — answers a browser's SDP offer and starts a pipeline behind it |
+| `PATCH /api/offer` | Trickled ICE candidates for an offer already answered |
+| `GET /dev` | Bare page that connects to the above so the echo can be checked by ear. Superseded by `demo-web` in 1.2 |
+
+Open <http://localhost:8003/dev> in a browser, wear headphones, and click Connect.
+For a number rather than an impression:
+
+```
+uv run python services/agent/tools/echo_probe.py
+```
+
+Set `ICE_SERVERS` (comma-separated) to override the default STUN server; only
+host candidates are needed when the browser is on the same machine.
 
 ## Status
 
-Scaffold only. Built in [PLAN](../../docs/PLAN.md) 1.1 (echo pipeline), 2.1–2.7 (conversation, persona, redaction), 3.1–3.2 / 3.7–3.8 / 3.11 (state machine, session lifecycle, token, judge).
+The echo pipeline is live ([PLAN](../../docs/PLAN.md) 1.1) — audio in, the same
+audio back out, nothing between. Still to come: 2.1–2.7 (conversation, persona,
+redaction), 3.1–3.2 / 3.7–3.8 / 3.11 (state machine, session lifecycle, token,
+judge). Each replaces the middle of the same pipeline; the transport stays.
