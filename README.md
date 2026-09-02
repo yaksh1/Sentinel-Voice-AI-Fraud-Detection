@@ -3,6 +3,7 @@
 **An event-driven voice agent that calls a cardholder within seconds of a suspicious transaction, verifies their identity, and releases or blocks the card — replacing the "press 1 if this was you" IVR with a real conversation.**
 
 <p>
+  <a href="https://github.com/yaksh1/Sentinel-Voice-AI-Fraud-Detection/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/yaksh1/Sentinel-Voice-AI-Fraud-Detection/actions/workflows/ci.yml/badge.svg?branch=main"></a>
   <img alt="stage" src="https://img.shields.io/badge/stage-design%20complete-blue">
   <img alt="alert to ring" src="https://img.shields.io/badge/alert%E2%86%92ring-%3C%203s%20p95-success">
   <img alt="voice to voice" src="https://img.shields.io/badge/voice%E2%86%92voice-%3C%201.2s%20p50-success">

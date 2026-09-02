@@ -76,7 +76,10 @@ services/*/               4 FastAPI apps with /health and /metrics
 
 - **Hit:** 2026-09-01 ~21:50, during 0.1.
 - **Symptom:** 0.1 specifies creating the repo from a template via the `new-project` skill; the skill is not installed.
-- **Resolution:** built the layout by hand at the user's direction. Two consequences: the done-when "`git log` shows one commit" was already false (the repo had two commits of design docs), and nothing a template would normally supply — CI workflow, lint/format config, packaging — came along. The uv workspace and `pyproject.toml` files added in 0.5/0.6 cover packaging; **CI and lint config remain unwritten** and are needed by Phase 5, whose tasks are all "test in CI, green".
+- **Resolution:** built the layout by hand at the user's direction. Two consequences: the done-when "`git log` shows one commit" was already false (the repo had two commits of design docs), and nothing a template would normally supply — CI workflow, lint/format config, packaging — came along. The uv workspace and `pyproject.toml` files added in 0.5/0.6 cover packaging; CI and lint config were written separately on 2026-09-02 (see below).
+- **CI, added 2026-09-02 13:06:** `.github/workflows/ci.yml` — a `lint` job (`ruff check`, `ruff format --check`, `uv lock --check`) and a `test` job (`pytest` against `redis:7-alpine` and `postgres:17` service containers). Both green on run [33658991794](https://github.com/yaksh1/Sentinel-Voice-AI-Fraud-Detection/actions/runs/33658991794): lint 10 s, test 25 s, `25 passed`. Ruff config lives in the root `pyproject.toml` (line-length 100, `E/F/I/UP/B/SIM`, the five `sentinel_*` packages first-party); it needed no source changes — the tree was already clean under it.
+- **Postgres in CI is a service container, not a Neon branch.** A Neon branch needs `NEON_API_KEY` in the environment, and GitHub withholds secrets from workflows triggered by pull requests from forks, so a public repo would have no gate on fork PRs. The schema is portable (guarded throughout, `gen_random_uuid()` is core Postgres 13+), and CI applies `001_init.sql` and `seed.sql` **twice** — which is what actually proves the idempotency claimed in 0.4 — then asserts the 8 tables and 8 `call_state` values.
+- **`astral-sh/setup-uv` publishes no moving major tag past v7.** `@v10` does not resolve; the first run failed at `Set up job` in 6 s. Pinned to `@v10.0.1`.
 
 ### B5 · Python 3.14 dependency risk · **RESOLVED (no action needed)**
 
@@ -94,7 +97,7 @@ services/*/               4 FastAPI apps with /health and /metrics
 
 ## Notes for the next session
 
-- **Owed to Phase 5:** a CI workflow and a lint/format config (B4). Every Phase 5 task ends in "test in CI, green", so this is on the critical path for the success metrics, not a nicety.
+- **CI is live** (B4): every push to `main` and every PR runs `lint` + `test`. Phase 5 tests need only be written — `testpaths` already covers `services/`, and the `test` job hands them `DATABASE_URL`, `DATABASE_URL_UNPOOLED` and `REDIS_URL` pointing at real containers. GitHub-hosted runners are free with no minute cap on public repos.
 - **Decisions live in [BRIEF §10](BRIEF.md), not here.** Open architectural questions with the task that closes each are in [ARCHITECTURE §14](ARCHITECTURE.md).
 - **Ports:** core-api 8000, risk-engine 8001, call-orchestrator 8002, agent 8003 (`.env.example`).
 - **Docker in an old shell:** if `docker` is not found, the shell predates the install — open a new terminal, or `export PATH="$PATH:/c/Users/yaksh/AppData/Local/Programs/DockerDesktop/resources/bin"` (B6).
