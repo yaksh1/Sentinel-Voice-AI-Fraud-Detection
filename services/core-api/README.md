@@ -1,6 +1,8 @@
 # `core-api`
 
-System of record and the browser's only server-sent-events endpoint. Every database write in the product goes through here.
+System of record and the browser's only server-sent-events endpoint. Owns the schema and every
+domain write — customers, cards, transactions, audit rows, turns. (Whether the orchestrator's
+`calls` writes route through here is open: [ARCHITECTURE §7](../../docs/ARCHITECTURE.md).)
 
 **Tech:** FastAPI · Neon Postgres · Redis
 

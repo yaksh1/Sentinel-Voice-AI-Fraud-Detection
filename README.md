@@ -11,7 +11,8 @@
 </p>
 
 > **Status — design complete, implementation in progress.**
-> The architecture, event contracts, state machine, failure map, and phased build plan are fully specified in [`docs/`](docs/). Code lands against [`docs/PLAN.md`](docs/PLAN.md), which gates every phase on a checkable *done when*. **If you are evaluating this repo today, the design docs are the artifact** — start with [BRIEF.md](docs/BRIEF.md).
+> The architecture, event contracts, state machine, failure map, and phased build plan are fully specified in [`docs/`](docs/) — [ARCHITECTURE.md](docs/ARCHITECTURE.md) is the engineering
+> reference for how the services fit together. Code lands against [`docs/PLAN.md`](docs/PLAN.md), which gates every phase on a checkable *done when*. **If you are evaluating this repo today, the design docs are the artifact** — start with [BRIEF.md](docs/BRIEF.md).
 
 ---
 
@@ -175,6 +176,7 @@ Redis is used three ways on purpose: **streams** are durable consumer-group queu
 docs/
   BRIEF.md                          problem, scenario, architecture, decisions, open questions
   PLAN.md                           phased build plan — entry gates, priorities, done-when
+  ARCHITECTURE.md                   services, boundaries, events, invariants — the engineering reference
   01_architecture_overview.mermaid  service topology
   02_handshake.mermaid              alert → ring → answer sequence, with failure branches
   03_state_machine.mermaid          conversation pathway with tool guards
