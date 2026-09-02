@@ -37,8 +37,9 @@ uv run uvicorn sentinel_agent.main:app --port 8003
 | `POST /api/offer` | WebRTC signalling — answers a browser's SDP offer and starts a pipeline behind it |
 | `PATCH /api/offer` | Trickled ICE candidates for an offer already answered |
 
-Run `demo-web` alongside it to talk to the agent from a browser. For a number
-rather than an impression:
+It reads the repo-root `.env` for `DEEPGRAM_API_KEY` and `CARTESIA_API_KEY`;
+without them the pipeline fails on the first call. Run `demo-web` alongside it
+to talk to the agent from a browser. For a number rather than an impression:
 
 ```
 uv run python services/agent/tools/echo_probe.py

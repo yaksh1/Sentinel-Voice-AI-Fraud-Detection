@@ -1,19 +1,22 @@
-"""The echo pipeline (PLAN 1.1).
+"""The echo pipeline (PLAN 1.1, speech added in 2.1).
 
-Phase 1 proves the transport, not the intelligence: audio in from the browser,
-the same audio straight back out, nothing in between. Every later phase keeps
-this shape and changes only the middle — 2.1 replaces EchoProcessor with
-STT -> LLM -> TTS, and 3.1 puts the state machine validator beside it.
+Still an echo — say something and the agent says it back — but the audio no
+longer short-circuits. Deepgram turns speech into a transcript and Cartesia
+turns the reply into speech, so the shape is now the one every later phase
+keeps: 2.2 puts a persona in the middle, and 3.1 the state machine validator.
 """
 
+import os
 import uuid
 
 from loguru import logger
-from pipecat.frames.frames import Frame, InputAudioRawFrame, OutputAudioRawFrame
+from pipecat.frames.frames import Frame, TranscriptionFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import RTVIClientMessageFrame, RTVIServerMessageFrame
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
@@ -26,39 +29,41 @@ from sentinel_agent.timing import FrameTimingProcessor
 TEXT_INPUT = "text-input"
 TEXT_ECHO = "text-echo"
 
+# Cartesia "Jacqueline — Reassuring Agent", picked for a bank fraud line.
+# 2.2 owns the persona and may well change it.
+VOICE_ID = "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"
+
 
 class EchoProcessor(FrameProcessor):
-    """Re-emit whatever the caller sent: microphone audio, or typed text.
+    """Say back whatever the caller said, spoken or typed.
 
-    The audio half is not a no-op, despite appearances. The input transport
-    emits `InputAudioRawFrame` (a SystemFrame) and the output transport only
-    ever plays `OutputAudioRawFrame`, so a bare input -> output pipeline
-    connects and stays silent. Re-wrapping the same PCM bytes in the output
-    frame *is* the echo. The original frame is forwarded too because it is a
-    SystemFrame and the pipeline's own bookkeeping rides on those.
+    Speech arrives as a `TranscriptionFrame` from Deepgram and leaves as a
+    `TTSSpeakFrame` for Cartesia. The reply cannot be the transcript simply
+    forwarded on: `TranscriptionFrame` subclasses `TextFrame`, but the TTS
+    service deliberately excludes transcription frames so that a pipeline never
+    speaks its own input. `TTSSpeakFrame` is the frame for a standalone
+    utterance, which is what a reply is.
 
-    The text half (PLAN 1.4) needs no second transport and no second pipeline.
+    Interim results need no filtering here — `InterimTranscriptionFrame` is a
+    sibling of `TranscriptionFrame`, not a subclass, so the check below already
+    sees only finals.
+
+    Typed text (PLAN 1.4) takes the same path and needs no second transport.
     `PipelineWorker` prepends its `RTVIProcessor` above everything here, so a
-    client message arrives as an `RTVIClientMessageFrame` travelling the same
-    path the audio does, and the reply leaves as an `RTVIServerMessageFrame`.
-    Phase 2 replaces this class with STT -> LLM -> TTS, and text keeps working
-    because it enters the pipeline at the same point a transcript would.
+    client message arrives as an `RTVIClientMessageFrame` and the reply leaves
+    as an `RTVIServerMessageFrame` — text in, text out, for the visitor who
+    declined the microphone.
     """
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Forward every frame; additionally echo input audio and typed text."""
+        """Forward every frame; additionally echo speech and typed text."""
         await super().process_frame(frame, direction)
 
         await self.push_frame(frame, direction)
 
-        if isinstance(frame, InputAudioRawFrame):
-            await self.push_frame(
-                OutputAudioRawFrame(
-                    audio=frame.audio,
-                    sample_rate=frame.sample_rate,
-                    num_channels=frame.num_channels,
-                )
-            )
+        if isinstance(frame, TranscriptionFrame):
+            logger.info("stt: {!r}", frame.text)
+            await self.push_frame(TTSSpeakFrame(frame.text))
         elif isinstance(frame, RTVIClientMessageFrame) and frame.type == TEXT_INPUT:
             text = (frame.data or {}).get("text", "")
             logger.info("echo: text in {!r}", text)
@@ -87,11 +92,19 @@ async def run_echo_bot(connection: SmallWebRTCConnection) -> None:
         ),
     )
 
+    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
+    tts = CartesiaTTSService(
+        api_key=os.environ["CARTESIA_API_KEY"],
+        settings=CartesiaTTSService.Settings(voice=VOICE_ID),
+    )
+
     pipeline = Pipeline(
         [
             transport.input(),
             FrameTimingProcessor(call_id),
+            stt,
             EchoProcessor(),
+            tts,
             transport.output(),
         ]
     )

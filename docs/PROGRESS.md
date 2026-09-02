@@ -12,7 +12,7 @@ Running log of what is actually done, verified how, and what got in the way.
 |---|---|---|
 | 0 · Bootstrap | 6 tasks (5 P0, 1 P1) | **✅ Complete** — every done-when verified, including the Redis half of 0.3 (B1 resolved) |
 | 1 · Transport skeleton | 5 tasks | **✅ Complete** — all five done; Safari half of 1.2 deferred to 4.6 (B9). **Phase 2 entry gate met** |
-| 2 · First conversation | 7 tasks | Not started |
+| 2 · First conversation | 7 tasks | **In progress** — 2.1 ✅ |
 | 3 · State machine + pipeline | 11 tasks | Not started |
 | 4 · Demo + observability | 7 tasks | Not started |
 | 5 · Hardening tests | 5 tasks | Not started |
@@ -189,6 +189,52 @@ preflight unchanged, `/dev` now 404s.
 
 ---
 
+## Phase 2 — First conversation
+
+| # | Task | Pri | Status | Verified | Evidence | Commit |
+|---|---|---|---|---|---|---|
+| 2.1 | Wire Deepgram Nova STT and Cartesia TTS into the pipeline | P0 | ✅ | 2026-09-02 17:00 | Real speech through the real pipeline, no browser needed: Cartesia synthesised "Hello. My name is Alex Rivera.", a probe streamed the WAV in over WebRTC, Deepgram returned it as **two** correctly endpointed utterances (`stt: 'Hello.'`, `stt: 'My name is Alex Rivera.'`) and Cartesia spoke both back as audio the probe received. Text mode (1.4) re-checked, no regression | *(this commit)* |
+| 2.2 | Persona system prompt + consent line | P0 | Not started | — | — | — |
+| 2.3 | Five Neon tools via `core-api`, each writing an audit row | P0 | Not started | — | — | — |
+| 2.4 | Calibrate the two-tier model stack | P1 | **Blocked by choice** — see B10 | — | — | — |
+| 2.5 | Full happy path in browser (deny + confirm) | P0 | Not started | — | — | — |
+| 2.6 | PAN redaction (regex + Luhn) | P0 | Not started | — | — | — |
+| 2.7 | Spec: state machine placement + structured-output schema | P0 | Not started | — | — | — |
+
+### First real latency numbers
+
+Cartesia, measured by Pipecat's own metrics on two consecutive utterances:
+
+| | |
+|---|---|
+| TTFB (request to first byte) | 0.130 s, 0.131 s |
+| TTFA (request to first audio) | 0.280 s, 0.281 s — of which 0.150 s is leading silence |
+
+[ARCHITECTURE](ARCHITECTURE.md) budgets **~250 ms** for "tts (time to first
+audio)". TTFB comes in at half that; TTFA lands just over, and 150 ms of it is
+silence Cartesia pads the front of the clip with. Worth revisiting in 2.4 —
+trimming leading silence may be free latency.
+
+### What 2.1 changed
+
+The audio no longer short-circuits. `EchoProcessor` used to re-wrap
+`InputAudioRawFrame` as `OutputAudioRawFrame`; that is gone, and the path is now
+`transport.input() → timing → Deepgram → EchoProcessor → Cartesia → transport.output()`.
+
+The one non-obvious bit: a transcript cannot simply be forwarded to the TTS.
+`TranscriptionFrame` subclasses `TextFrame`, which is what TTS consumes, but the
+TTS service explicitly excludes both `TranscriptionFrame` and
+`InterimTranscriptionFrame` so that a pipeline never speaks its own input. The
+reply has to be a `TTSSpeakFrame`, the frame for a standalone utterance.
+Interim results need no filtering of our own either —
+`InterimTranscriptionFrame` is a *sibling* of `TranscriptionFrame`, not a
+subclass, so the `isinstance` check already sees only finals.
+
+`python-dotenv` arrived with this task: the vendor keys have been sitting in
+`.env` since 0.2 and uvicorn never read it.
+
+---
+
 ## Blockers
 
 ### B1 · No container runtime — Redis cannot run locally · **RESOLVED**
@@ -290,6 +336,23 @@ preflight unchanged, `/dev` now 404s.
 - **Carried risk:** Phase 2 and 3 build on a transport proven only on Chromium. If Safari
   turns out to need transport changes (autoplay, codec negotiation), it surfaces late.
   Accepted knowingly — the alternative spends Saturday on deployment plumbing.
+
+### B10 · 2.4 needs the Anthropic key, which is off limits · **OPEN**
+
+- **Raised:** 2026-09-02, by instruction at the start of Phase 2.
+- **Constraint:** do not call the Anthropic API without discussing it first;
+  use Cerebras where a model is needed.
+- **What it blocks:** 2.4 calibrates the *two-tier* stack, and half of that is
+  "judge round-trip when escalation fires" — a Claude Sonnet 5 call. The
+  Cerebras half (`gpt-oss-120b` `llm_ms` p50/p95, tool-call correctness over 10
+  runs) is unaffected and can be done in full. 3.11 is the judge itself and is
+  blocked the same way.
+- **Options when it comes up:** split 2.4 and do the Cerebras half now, leaving
+  the judge column empty; or agree a budget for a handful of Sonnet calls, which
+  is what a p50/p95 over ~10 escalations would actually cost; or cut the judge
+  from v1 entirely, which the PLAN's own cut line already contemplates (3.11 and
+  2.4 are both P1).
+- **Not urgent:** 2.4 is P1 and nothing before 2.5 depends on it.
 
 ---
 

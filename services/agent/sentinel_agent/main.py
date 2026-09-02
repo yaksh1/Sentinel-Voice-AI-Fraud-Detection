@@ -11,6 +11,7 @@ services/agent/README.md.
 import os
 from contextlib import asynccontextmanager
 
+from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pipecat.transports.smallwebrtc.connection import IceServer, SmallWebRTCConnection
@@ -22,6 +23,10 @@ from pipecat.transports.smallwebrtc.request_handler import (
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from sentinel_agent.echo import run_echo_bot
+
+# The Deepgram and Cartesia keys live in the repo-root .env (PLAN 0.2), and
+# uvicorn does not read it. Must happen before the pipeline reads os.environ.
+load_dotenv()
 
 SERVICE = "agent"
 
