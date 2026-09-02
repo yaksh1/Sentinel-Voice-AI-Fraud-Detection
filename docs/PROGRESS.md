@@ -11,13 +11,15 @@ Running log of what is actually done, verified how, and what got in the way.
 | Phase | Scope | Status |
 |---|---|---|
 | 0 · Bootstrap | 6 tasks (5 P0, 1 P1) | **✅ Complete** — every done-when verified, including the Redis half of 0.3 (B1 resolved) |
-| 1 · Transport skeleton | 5 tasks | **In progress** — 1.1 ✅ · 1.3 ✅ · 1.2 built, Chrome check outstanding; Safari deferred to 4.6 (B9) |
+| 1 · Transport skeleton | 5 tasks | **In progress** — 1.1–1.3 ✅ (Safari half of 1.2 deferred to 4.6, B9). **Phase 2 entry gate met** |
 | 2 · First conversation | 7 tasks | Not started |
 | 3 · State machine + pipeline | 11 tasks | Not started |
 | 4 · Demo + observability | 7 tasks | Not started |
 | 5 · Hardening tests | 5 tasks | Not started |
 
 **Phase 1 entry gate — "Phase 0 P0 done": met** (2026-09-02). Nothing outstanding.
+
+**Phase 2 entry gate — "1.1–1.3 done": met** (2026-09-02). 1.4 and 1.5 are P1 and do not gate it.
 
 ---
 
@@ -52,9 +54,9 @@ services/*/               4 FastAPI apps with /health and /metrics
 
 | # | Task | Pri | Status | Verified | Evidence | Commit |
 |---|---|---|---|---|---|---|
-| 1.1 | `agent`: Pipecat pipeline with SmallWebRTC transport, echo processor | P0 | ✅ | 2026-09-02 13:50 | Audio round trip measured, not guessed: `tools/echo_probe.py` sends eight 440 Hz bursts as a real WebRTC peer and times the return. 8/8 echoed, **median 281 ms** (278–283) across two consecutive runs. Connect and disconnect both log; the runner cancels on disconnect with no leak | *(this commit)* |
-| 1.2 | `demo-web`: Pipecat JS client, Connect button, mic permission | P0 | ⚠️ Partial | 2026-09-02 14:20 | Next.js 16 app; `npm run build`, `tsc --noEmit` and `eslint` all clean. Server side verified without a browser: CORS preflight returns the right `access-control-allow-*` for `http://localhost:3000`, and an aiortc probe speaking RTVI gets `bot-ready` back from `client-ready` — the exact exchange `PipecatClient.connect()` waits on. **The Chrome/Safari listening test is not done** — see B8 and B9 | *(this commit)* |
-| 1.3 | Per-frame timing: `net_ms` per audio frame with a `call_id` | P0 | ✅ | 2026-09-02 14:30 | One probe run produced **1085 per-frame TRACE lines** and 8 INFO summaries, all carrying the same `call_id` as the connect and disconnect lines. `frames=101` per 2 s confirms 20 ms frames at 50 fps. `net_ms` p50 1.7, p95 9.1, max 16.3 | *(this commit)* |
+| 1.1 | `agent`: Pipecat pipeline with SmallWebRTC transport, echo processor | P0 | ✅ | 2026-09-02 13:50 | Audio round trip measured, not guessed: `tools/echo_probe.py` sends eight 440 Hz bursts as a real WebRTC peer and times the return. 8/8 echoed, **median 281 ms** (278–283) across two consecutive runs. Confirmed by ear in Chrome on 2026-09-02: the delay was not noticeable, which is the done-when as written. Connect and disconnect both log; the runner cancels on disconnect with no leak | `e16f35a` |
+| 1.2 | `demo-web`: Pipecat JS client, Connect button, mic permission | P0 | ✅ Chrome | 2026-09-02 14:45 | Next.js 16 app; `npm run build`, `tsc --noEmit` and `eslint` all clean. Server side verified without a browser: CORS preflight returns the right `access-control-allow-*` for `http://localhost:3000`, and an aiortc probe speaking RTVI gets `bot-ready` back from `client-ready` — the exact exchange `PipecatClient.connect()` waits on. Chrome confirmed by ear on 2026-09-02: connected, echo heard. Safari deferred to 4.6 (B9) | `d44e69a` |
+| 1.3 | Per-frame timing: `net_ms` per audio frame with a `call_id` | P0 | ✅ | 2026-09-02 14:30 | One probe run produced **1085 per-frame TRACE lines** and 8 INFO summaries, all carrying the same `call_id` as the connect and disconnect lines. `frames=101` per 2 s confirms 20 ms frames at 50 fps. `net_ms` p50 1.7, p95 9.1, max 16.3 | `e993950` |
 | 1.4 | Text transport through the same pipeline | P1 | Not started | — | — | — |
 | 1.5 | Decide: text mode reuses `session.create` | P1 | Not started | — | — | — |
 
