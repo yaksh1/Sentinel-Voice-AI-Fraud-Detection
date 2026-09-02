@@ -12,7 +12,7 @@ Running log of what is actually done, verified how, and what got in the way.
 |---|---|---|
 | 0 · Bootstrap | 6 tasks (5 P0, 1 P1) | **✅ Complete** — every done-when verified, including the Redis half of 0.3 (B1 resolved) |
 | 1 · Transport skeleton | 5 tasks | **✅ Complete** — all five done; Safari half of 1.2 deferred to 4.6 (B9). **Phase 2 entry gate met** |
-| 2 · First conversation | 7 tasks | **In progress** — 2.1 ✅ · 2.2 ✅ |
+| 2 · First conversation | 7 tasks | **In progress** — 2.1 ✅ · 2.2 ✅ · 2.3 ✅ |
 | 3 · State machine + pipeline | 11 tasks | Not started |
 | 4 · Demo + observability | 7 tasks | Not started |
 | 5 · Hardening tests | 5 tasks | Not started |
@@ -195,7 +195,7 @@ preflight unchanged, `/dev` now 404s.
 |---|---|---|---|---|---|---|
 | 2.1 | Wire Deepgram Nova STT and Cartesia TTS into the pipeline | P0 | ✅ | 2026-09-02 17:00 · browser 2026-09-02 | Real speech through the real pipeline, no browser needed: Cartesia synthesised "Hello. My name is Alex Rivera.", a probe streamed the WAV in over WebRTC, Deepgram returned it as **two** correctly endpointed utterances (`stt: 'Hello.'`, `stt: 'My name is Alex Rivera.'`) and Cartesia spoke both back as audio the probe received. Text mode (1.4) re-checked, no regression. Confirmed by ear in the browser | `311b4a9` |
 | 2.2 | Persona system prompt + consent line | P0 | ✅ | 2026-09-02 17:55 | The consent line is the first thing spoken, before the model is asked for anything — confirmed in the TTS log on every run. A full turn now works: caller says "Yes, now is a good time", agent replies *"Great, thank you. To verify your account, could you please tell me the last four digits of the card…"* — persona holding, and asking for last four rather than a full number without being reminded. Typed input reaches the same conversation and gets the same persona | *(this commit)* |
-| 2.3 | Five Neon tools via `core-api`, each writing an audit row | P0 | Not started | — | — | — |
+| 2.3 | Five Neon tools via `core-api`, each writing an audit row | P0 | ✅ | 2026-09-02 19:05 | All five exercised against the real Neon branch, 17 assertions green. Each returns the right data *and* the row in Neon agrees: transaction released then blocked, card blocked with `reissued_at` stamped, `verified` set. Exactly one `audit_log` row per successful call, and zero rows containing the challenge answer | *(this commit)* |
 | 2.4 | Calibrate the two-tier model stack | P1 | **Blocked by choice** — see B10 | — | — | — |
 | 2.5 | Full happy path in browser (deny + confirm) | P0 | Not started | — | — | — |
 | 2.6 | PAN redaction (regex + Luhn) | P0 | Not started | — | — | — |
@@ -341,6 +341,55 @@ kind. Not "the model said something wrong", but "I gave the model, or the
 pipeline, an authority it should not have had" — first the freedom to open the
 call however it liked, then the freedom to have its disclosure cut short. BRIEF
 §5's "enforced in code, not in the prompt" is a broader rule than it looks.
+
+### What 2.3 decided
+
+**Attempts are counted from `audit_log`, not a new column.** `verify_challenge`
+has to report which attempt this is (BRIEF §5 caps retries at 2). Every call is
+already recorded in `audit_log`, so a second source of truth would only be a
+second thing to keep correct. Enforcing the cap stays with the state machine in
+3.1; the tool only reports the count.
+
+**The challenge answer is never stored.** The audit row keeps `last4` — which is
+not sensitive on its own and is what makes the row auditable — plus two booleans
+saying whether each factor matched. A city of birth is a knowledge factor, and
+an audit log full of them is a credential dump. Asserted, not assumed: the REPL
+check greps `audit_log` for the seeded answer and requires zero hits.
+
+**`block_card_and_reissue` also blocks the held transaction.** BRIEF §4 ends
+with the dashboard showing the transaction blocked *and* the card reissued, and
+the agent gets one tool call to reach that state. So the held transaction moves
+with the card rather than needing a second call.
+
+**There is no tickets table, and `escalate_to_analyst` does not add one.** The
+`audit_log` row *is* the ticket: it carries the call and the reason. If analysts
+ever get a queue, it reads from there.
+
+**Refused calls write nothing yet.** A second `release_hold` on an
+already-released transaction returns 409 and writes no audit row, because
+nothing happened. Auditing *refusals* is PLAN 3.2, where a guard rejection is
+itself the event worth recording — its done-when is "refused **and audited**".
+
+**Guards are not in 2.3.** These endpoints do what they are asked; the agent is
+trusted. That is the thing 3.1 and 3.2 stop being true, and the module docstring
+says so, so nobody mistakes the current state for the finished one.
+
+### Seed grew a transaction and an alert
+
+`db/seed.sql` now carries BRIEF §4's *$940 at Lisboa Eletrónica*, held, with an
+open `fraud_alerts` row citing `foreign_merchant` and `amount_over_threshold`.
+3.4 will create these through `POST /checkout`; seeding them is what lets 2.3
+and 2.5 run before that endpoint exists. Applied twice, still one row each.
+
+### B12 · `load_dotenv()` cannot be called from stdin · **RESOLVED**
+
+- **Hit:** 2026-09-02 19:00, running a throwaway script via `uv run python - <<EOF`.
+- **Symptom:** `AssertionError` inside `find_dotenv`, nowhere near anything
+  obviously wrong.
+- **Cause:** bare `load_dotenv()` finds `.env` by walking up from *the calling
+  frame's file*. Read from stdin there is no file, and the frame walk asserts.
+- **Resolution:** pass the path — `load_dotenv(".env")` — in scratch scripts.
+  Service code calls it from a real module and is unaffected.
 
 ---
 

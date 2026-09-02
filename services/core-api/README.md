@@ -10,7 +10,7 @@ System of record and the browser's only server-sent-events endpoint. Owns the sc
 
 **Data.** `customers`, `cards`, `transactions`, `fraud_alerts`, `calls`, `turns`, `audit_log`, `sandbox_sessions` (schema in [BRIEF §5](../../docs/BRIEF.md)).
 
-**Tools** exposed to `agent`, each writing an `audit_log` row and each guarded by call state:
+**Tools** exposed to `agent` (live, PLAN 2.3), each writing an `audit_log` row in the same transaction as its change. The state guards below are PLAN 3.2 and are **not** implemented yet:
 
 | Tool | Guard |
 |---|---|
