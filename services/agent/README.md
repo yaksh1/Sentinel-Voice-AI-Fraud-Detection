@@ -37,8 +37,8 @@ uv run uvicorn sentinel_agent.main:app --port 8003
 | `POST /api/offer` | WebRTC signalling — answers a browser's SDP offer and starts a pipeline behind it |
 | `PATCH /api/offer` | Trickled ICE candidates for an offer already answered |
 
-It reads the repo-root `.env` for `DEEPGRAM_API_KEY` and `CARTESIA_API_KEY`;
-without them the pipeline fails on the first call. Run `demo-web` alongside it
+It reads the repo-root `.env` for `DEEPGRAM_API_KEY`, `CEREBRAS_API_KEY` and
+`CARTESIA_API_KEY`; without them the pipeline fails on the first call. Run `demo-web` alongside it
 to talk to the agent from a browser. For a number rather than an impression:
 
 ```
@@ -61,7 +61,8 @@ deliberately does not.
 
 ## Status
 
-The echo pipeline is live ([PLAN](../../docs/PLAN.md) 1.1) — audio in, the same
-audio back out, nothing between. Still to come: 2.1–2.7 (conversation, persona,
-redaction), 3.1–3.2 / 3.7–3.8 / 3.11 (state machine, session lifecycle, token,
-judge). Each replaces the middle of the same pipeline; the transport stays.
+A caller can hold a conversation with it ([PLAN](../../docs/PLAN.md) 1.1–2.2):
+consent line on connect, then Deepgram → Cerebras `gpt-oss-120b` → Cartesia, by
+voice or by typing. Still to come: 2.3 (Neon tools), 2.6 (PAN redaction),
+2.7 / 3.1–3.2 (state machine and its validator), 3.7–3.8 (session lifecycle and
+token), 3.11 (judge). The authority rules live in code, not in the prompt.

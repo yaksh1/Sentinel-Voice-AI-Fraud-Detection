@@ -12,7 +12,7 @@ Running log of what is actually done, verified how, and what got in the way.
 |---|---|---|
 | 0 · Bootstrap | 6 tasks (5 P0, 1 P1) | **✅ Complete** — every done-when verified, including the Redis half of 0.3 (B1 resolved) |
 | 1 · Transport skeleton | 5 tasks | **✅ Complete** — all five done; Safari half of 1.2 deferred to 4.6 (B9). **Phase 2 entry gate met** |
-| 2 · First conversation | 7 tasks | **In progress** — 2.1 ✅ |
+| 2 · First conversation | 7 tasks | **In progress** — 2.1 ✅ · 2.2 ✅ |
 | 3 · State machine + pipeline | 11 tasks | Not started |
 | 4 · Demo + observability | 7 tasks | Not started |
 | 5 · Hardening tests | 5 tasks | Not started |
@@ -193,8 +193,8 @@ preflight unchanged, `/dev` now 404s.
 
 | # | Task | Pri | Status | Verified | Evidence | Commit |
 |---|---|---|---|---|---|---|
-| 2.1 | Wire Deepgram Nova STT and Cartesia TTS into the pipeline | P0 | ✅ | 2026-09-02 17:00 | Real speech through the real pipeline, no browser needed: Cartesia synthesised "Hello. My name is Alex Rivera.", a probe streamed the WAV in over WebRTC, Deepgram returned it as **two** correctly endpointed utterances (`stt: 'Hello.'`, `stt: 'My name is Alex Rivera.'`) and Cartesia spoke both back as audio the probe received. Text mode (1.4) re-checked, no regression | *(this commit)* |
-| 2.2 | Persona system prompt + consent line | P0 | Not started | — | — | — |
+| 2.1 | Wire Deepgram Nova STT and Cartesia TTS into the pipeline | P0 | ✅ | 2026-09-02 17:00 · browser 2026-09-02 | Real speech through the real pipeline, no browser needed: Cartesia synthesised "Hello. My name is Alex Rivera.", a probe streamed the WAV in over WebRTC, Deepgram returned it as **two** correctly endpointed utterances (`stt: 'Hello.'`, `stt: 'My name is Alex Rivera.'`) and Cartesia spoke both back as audio the probe received. Text mode (1.4) re-checked, no regression. Confirmed by ear in the browser | `311b4a9` |
+| 2.2 | Persona system prompt + consent line | P0 | ✅ | 2026-09-02 17:55 | The consent line is the first thing spoken, before the model is asked for anything — confirmed in the TTS log on every run. A full turn now works: caller says "Yes, now is a good time", agent replies *"Great, thank you. To verify your account, could you please tell me the last four digits of the card…"* — persona holding, and asking for last four rather than a full number without being reminded. Typed input reaches the same conversation and gets the same persona | *(this commit)* |
 | 2.3 | Five Neon tools via `core-api`, each writing an audit row | P0 | Not started | — | — | — |
 | 2.4 | Calibrate the two-tier model stack | P1 | **Blocked by choice** — see B10 | — | — | — |
 | 2.5 | Full happy path in browser (deny + confirm) | P0 | Not started | — | — | — |
@@ -232,6 +232,55 @@ subclass, so the `isinstance` check already sees only finals.
 
 `python-dotenv` arrived with this task: the vendor keys have been sitting in
 `.env` since 0.2 and uvicorn never read it.
+
+### What 2.2 decided
+
+**The consent line is a constant, spoken deterministically — not generated.**
+`CONSENT_LINE` is pushed as a `TTSSpeakFrame` on connect, before the model is
+asked for anything. Two reasons, and both matter: 2.2's done-when is that it
+comes *first*, which a model asked to be concise cannot be relied on to honour;
+and a consent and recording disclosure is the one line on the call whose wording
+should not be paraphrased by anything.
+
+**The persona prompt carries style and safety, not authority.** BRIEF §5 is
+explicit that the state machine's rules are "enforced in code, not in the
+prompt". So `SYSTEM_PROMPT` covers voice (no markdown, one or two sentences,
+numbers written as spoken) and the two hard "never"s — never say a full card
+number, never ask for a PIN or a one-time code — and says nothing about
+`verify_identity` gating `action_*`. That gate is 3.1's validator. The prompt
+must not grow into a substitute for it.
+
+**`echo.py` became `pipeline.py`.** It stopped being an echo the moment the LLM
+went in, and leaving the old name would have been misleading rather than
+surgical.
+
+### B11 · Turn-taking needs VAD, and 2.1 had dropped it · **RESOLVED**
+
+- **Hit:** 2026-09-02 17:45, first full conversation attempt.
+- **Symptom:** the consent line played, the caller spoke, Cerebras generated a
+  reply — and nothing was ever spoken. The log showed the LLM completing and
+  then being cancelled.
+- **Cause:** with no VAD analyzer the user aggregator ends a turn on every
+  *final transcript*, and Deepgram splits even "Yes, now is a good time." into
+  `'Yes.'` and `'Now is a good time.'`. The second transcript starts a new user
+  turn, which broadcasts an interruption, which kills the in-flight reply to the
+  first. The caller is never answered — and nothing errors, which is what made
+  it worth writing down.
+- **Resolution:** `LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer())`,
+  so silence rather than punctuation decides when a turn is over.
+- **Worth admitting:** 2.1 added the `silero` extra and then removed it again as
+  "unused", on the simplicity pass's logic. It was not unused, it was
+  not-yet-used. Removing a dependency because nothing imports it *yet* is the
+  same speculation as adding one for later, pointed the other way.
+
+### Cerebras latency, first look
+
+`CerebrasLLMService` TTFB on two clean turns: **0.94 s** and **1.00 s**.
+[ARCHITECTURE](ARCHITECTURE.md) budgets **~400 ms** for `llm`, so this is
+roughly 2.5× over on a single-sentence context. Too early to conclude anything —
+these are cold, unbatched, first-of-connection calls and the context is tiny —
+but 2.4 exists precisely to measure this, and the number to beat is now on
+record rather than assumed.
 
 ---
 

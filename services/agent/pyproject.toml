@@ -8,7 +8,7 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "prometheus-client>=0.21",
-    "pipecat-ai[cartesia,deepgram,webrtc]>=1.8.1",
+    "pipecat-ai[cartesia,cerebras,deepgram,silero,webrtc]>=1.8.1",
     "python-dotenv>=1.2.3",
 ]
 

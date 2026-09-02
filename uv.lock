@@ -1864,7 +1864,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
-    { name = "pipecat-ai", extras = ["cartesia", "deepgram", "webrtc"], specifier = ">=1.8.1" },
+    { name = "pipecat-ai", extras = ["cartesia", "cerebras", "deepgram", "silero", "webrtc"], specifier = ">=1.8.1" },
     { name = "prometheus-client", specifier = ">=0.21" },
     { name = "python-dotenv", specifier = ">=1.2.3" },
     { name = "sentinel-contracts", editable = "contracts" },

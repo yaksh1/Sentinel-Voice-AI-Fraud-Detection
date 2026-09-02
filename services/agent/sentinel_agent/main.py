@@ -22,7 +22,7 @@ from pipecat.transports.smallwebrtc.request_handler import (
 )
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-from sentinel_agent.echo import run_echo_bot
+from sentinel_agent.pipeline import run_agent
 
 # The Deepgram and Cartesia keys live in the repo-root .env (PLAN 0.2), and
 # uvicorn does not read it. Must happen before the pipeline reads os.environ.
@@ -82,7 +82,7 @@ async def offer(request: SmallWebRTCRequest, background_tasks: BackgroundTasks) 
     """
 
     async def start_pipeline(connection: SmallWebRTCConnection) -> None:
-        background_tasks.add_task(run_echo_bot, connection)
+        background_tasks.add_task(run_agent, connection)
 
     # Raises rather than returning None when no answer can be produced, so
     # there is no empty-answer case to handle here.

@@ -9,9 +9,8 @@ import { useEffect, useRef, useState } from "react";
 const AGENT_OFFER_URL =
   process.env.NEXT_PUBLIC_AGENT_OFFER_URL ?? "http://localhost:8003/api/offer";
 
-// Must match sentinel_agent/echo.py.
+// Must match sentinel_agent/pipeline.py.
 const TEXT_INPUT = "text-input";
-const TEXT_ECHO = "text-echo";
 
 const BUSY: TransportState[] = ["initializing", "connecting", "authenticating"];
 
@@ -40,9 +39,12 @@ export function VoiceWidget() {
           if (participant?.local || track.kind !== "audio") return;
           if (audio.current) audio.current.srcObject = new MediaStream([track]);
         },
-        onServerMessage: (data) => {
-          if (data?.type !== TEXT_ECHO) return;
-          setLines((prev) => [...prev, { from: "agent", text: String(data.text) }]);
+        // The agent replies through the LLM now, so its words arrive as bot
+        // output over RTVI rather than as a custom echo message. Sentences
+        // stream in, so append rather than replace.
+        onBotOutput: (data) => {
+          if (!data?.text) return;
+          setLines((prev) => [...prev, { from: "agent", text: data.text }]);
         },
       },
     });
@@ -78,7 +80,8 @@ export function VoiceWidget() {
     const text = draft.trim();
     if (!text || !connected) return;
     // Same pipeline as the audio: this leaves over the RTVI data channel and
-    // reaches the echo processor as a frame, exactly as a transcript would.
+    // is re-emitted server-side as a transcript, so typed and spoken input
+    // reach the model identically (BRIEF section 10).
     client.current?.sendClientMessage(TEXT_INPUT, { text });
     setLines((prev) => [...prev, { from: "you", text }]);
     setDraft("");
@@ -88,8 +91,8 @@ export function VoiceWidget() {
     <section>
       <h1>Sentinel</h1>
       <p className="sub">
-        Phase 1: the agent echoes you back, by voice or by typing. Wear headphones
-        — on speakers the echo feeds back on itself.
+        Meridian Bank Fraud Prevention. Connect and it will read you a consent
+        line, then talk — by voice or by typing. Headphones recommended.
       </p>
 
       <button onClick={toggle} disabled={busy}>
