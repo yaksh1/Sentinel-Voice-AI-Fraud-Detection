@@ -177,6 +177,7 @@ docs/
   BRIEF.md                          problem, scenario, architecture, decisions, open questions
   PLAN.md                           phased build plan — entry gates, priorities, done-when
   ARCHITECTURE.md                   services, boundaries, events, invariants — the engineering reference
+  PROGRESS.md                       task log — what is verified, blockers, and how each was resolved
   01_architecture_overview.mermaid  service topology
   02_handshake.mermaid              alert → ring → answer sequence, with failure branches
   03_state_machine.mermaid          conversation pathway with tool guards
