@@ -1,0 +1,36 @@
+# Local infrastructure for Sentinel.
+#
+# Redis only. There is deliberately no Postgres service — Neon branches serve
+# dev and CI (`neon checkout <name>`, auto-expiring TTL), so local and deployed
+# environments run the same Postgres version against the same schema.
+#
+#   docker compose up -d
+#   docker compose exec redis redis-cli XINFO STREAM fraud.alert
+#     → (error) ERR no such key        # server up, stream not yet created
+#
+# Redis carries three separate roles here (streams, pub/sub, keys) — see
+# docs/ARCHITECTURE.md §3.
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: sentinel-redis
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --save ""
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 2s
+    restart: unless-stopped
+
+volumes:
+  redis-data:
