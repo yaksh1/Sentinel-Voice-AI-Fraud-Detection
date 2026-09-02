@@ -180,8 +180,17 @@ docs/
   03_state_machine.mermaid          conversation pathway with tool guards
   03b_transition_guard_loop.mermaid LLM proposal → validator → judge → commit
   05_failure_recovery_map.mermaid   every known failure and its recovery
+services/
+  demo-web/                         checkout, voice widget, dashboard (Next.js)
+  risk-engine/                      rule evaluation → fraud.alert (FastAPI)
+  call-orchestrator/                dedupe, rate limit, capacity, ring timer (FastAPI worker)
+  agent/                            Pipecat pipeline, state machine, tools, judge
+  core-api/                         Postgres, tools, checkout, SSE endpoint (FastAPI)
 neon.ts                             Neon config policy
 ```
+
+Each service directory carries a README stating what it owns, what it deliberately does not,
+and which streams, pub/sub channels, and Redis keys it touches.
 
 ---
 
