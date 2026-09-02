@@ -11,7 +11,7 @@ Running log of what is actually done, verified how, and what got in the way.
 | Phase | Scope | Status |
 |---|---|---|
 | 0 · Bootstrap | 6 tasks (5 P0, 1 P1) | **✅ Complete** — every done-when verified, including the Redis half of 0.3 (B1 resolved) |
-| 1 · Transport skeleton | 5 tasks | **In progress** — 1.1 ✅ · 1.2 built, browser check outstanding (B8, B9) |
+| 1 · Transport skeleton | 5 tasks | **In progress** — 1.1 ✅ · 1.2 built, Chrome check outstanding; Safari deferred to 4.6 (B9) |
 | 2 · First conversation | 7 tasks | Not started |
 | 3 · State machine + pipeline | 11 tasks | Not started |
 | 4 · Demo + observability | 7 tasks | Not started |
@@ -199,7 +199,7 @@ Two things were worth finding out before writing the page:
   `client-ready`/`bot-ready` exchange. That covers everything except the browser
   half, which now needs a human.
 
-### B9 · No Safari, and none reachable · **OPEN**
+### B9 · No Safari, and none reachable · **DEFERRED to 4.6**
 
 - **Hit:** 2026-09-02 14:20, at 1.2's done-when.
 - **Symptom:** 1.2 requires "echo works from Chrome and Safari". This is Windows;
@@ -213,8 +213,13 @@ Two things were worth finding out before writing the page:
   a phone on the LAN cannot use the mic against `http://<lan-ip>:3000`. Testing
   on a real iPhone needs HTTPS — a tunnel (cloudflared/ngrok) or a local cert —
   which is most of PLAN 4.6 pulled forward.
-- **Status:** needs a decision. Neither browser has been listened to yet — Chrome is a
-  five-minute check for whoever has the machine, Safari needs hardware this box does not have.
+- **Decision (2026-09-02):** defer the Safari half to [PLAN](PLAN.md) 4.6. That task already
+  has to produce a public URL that "rings on a phone browser", which means HTTPS and a real
+  device — exactly what Safari needs. Building a tunnel now would be building 4.6 twice.
+  4.6's done-when has been amended to name Safari so it cannot be quietly skipped.
+- **Carried risk:** Phase 2 and 3 build on a transport proven only on Chromium. If Safari
+  turns out to need transport changes (autoplay, codec negotiation), it surfaces late.
+  Accepted knowingly — the alternative spends Saturday on deployment plumbing.
 
 ---
 

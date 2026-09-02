@@ -90,7 +90,7 @@ Entry gate: 3.10 done. Goal: what a visitor and a reader of the README will see.
 | 4.3 | OTel spans: `ring`, `session.create→ready`, `webrtc.connect`, per-turn `stt/llm/tool.*/tts/network`; trace ID = `call_id` | P0 | One trace per call visible in collector/Jaeger | 3.6, 3.7 |
 | 4.4 | Metrics: `alert_to_ring_ms`, `session_ready_ms`, `answer_to_first_tts_ms`, `agent_sessions_active/rejected`, `session_create_stream_lag`, `judge_invocations_total`, `judge_ms`, dedupe hits, rate-limit rejects | P0 | All appear on `/metrics` with values after one call | 3.6, 3.7 |
 | 4.5 | Sandbox guardrails: 3-min session cap, daily minute cap, IP rate limit, "sandbox busy" UI state | P1 | Cap triggers visibly; text mode unaffected | 3.6 |
-| 4.6 | Deploy: services on Fly.io/Railway, `demo-web` on Vercel, Neon Postgres already linked (commit the services hosting decision) | P1 | Public URL rings on a phone browser | 4.1–4.4 |
+| 4.6 | Deploy: services on Fly.io/Railway, `demo-web` on Vercel, Neon Postgres already linked (commit the services hosting decision) | P1 | Public URL rings on a phone browser, **and the echo/consent line works in iOS Safari** — 1.2's deferred half, see PROGRESS B9 | 4.1–4.4 |
 | 4.7 | In-app Grafana-style panel beside widget (Grafana proper deferred to write-up) | P2 | — | 4.4 |
 
 Risk: deploy eats the evening. Mitigation: 4.6 is P1; a local demo over a tunnel (ngrok/cloudflared) is acceptable for Sunday.
