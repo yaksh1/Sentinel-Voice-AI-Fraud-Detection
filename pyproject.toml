@@ -33,7 +33,31 @@ sentinel-call-orchestrator = { workspace = true }
 sentinel-agent = { workspace = true }
 
 [dependency-groups]
-dev = ["pytest>=8.0", "httpx>=0.27"]
+dev = ["pytest>=8.0", "httpx>=0.27", "ruff>=0.14"]
 
 [tool.pytest.ini_options]
-testpaths = ["contracts/tests"]
+# contracts/tests today; services/ is listed so per-service tests (Phase 5) are
+# collected the moment they land, without touching this file again.
+testpaths = ["contracts/tests", "services"]
+
+# One ruff config for the whole workspace: the service pyproject.toml files
+# declare no [tool.ruff], so ruff walks up to this one.
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# E/F pyflakes+pycodestyle, I import order, UP pyupgrade, B bugbear, SIM
+# simplify. Deliberately not the full set — this is a lint, not a style debate.
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.isort]
+# Workspace packages are first-party, so they keep their own import block
+# instead of being folded in with pydantic and fastapi.
+known-first-party = [
+    "sentinel_contracts",
+    "sentinel_core_api",
+    "sentinel_risk_engine",
+    "sentinel_call_orchestrator",
+    "sentinel_agent",
+]

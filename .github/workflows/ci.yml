@@ -1,0 +1,129 @@
+# CI for the Sentinel monorepo (PLAN blocker B4).
+#
+# Two jobs, both on GitHub-hosted ubuntu runners, which are free with no minute
+# cap on public repositories:
+#
+#   lint  — ruff check + ruff format, and a lockfile-drift check
+#   test  — pytest against real Redis and real Postgres service containers
+#
+# Phase 5's tasks all end in "test in CI, green"; they need infrastructure, not
+# mocks (5.4 races five alerts through Redis, 5.1 reads audit_log). Both are
+# service containers here rather than a Neon branch: branches would need
+# NEON_API_KEY in the environment, and GitHub withholds secrets from workflows
+# triggered by pull requests from forks — a public-repo CI that cannot run on a
+# fork PR is not much of a gate. The schema is portable (the migration is
+# guarded throughout and gen_random_uuid() is core Postgres 13+), so the same
+# db/migrations/001_init.sql applies to both.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only: nothing here writes to the repo, and nothing deploys.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Never re-resolve in CI. If uv.lock has drifted from the pyproject files the
+  # run fails, instead of quietly testing a dependency set nobody committed.
+  UV_FROZEN: "1"
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      # Reads .python-version, then installs the dev group (ruff, pytest).
+      - name: Install workspace
+        run: uv sync
+
+      - name: Lockfile is current
+        run: uv lock --check
+
+      - name: ruff check
+        run: uv run ruff check .
+
+      - name: ruff format
+        run: uv run ruff format --check .
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+
+    services:
+      # Same image as docker-compose.yml. Streams, pub/sub and plain keys all
+      # come from this one server — see docs/ARCHITECTURE.md §3.
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+      # Stands in for the Neon branch used in dev. Same major version.
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: sentinel
+          POSTGRES_PASSWORD: sentinel
+          POSTGRES_DB: sentinel
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sentinel -d sentinel"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+    env:
+      # The names the services read (.env.example). Pooled and unpooled are the
+      # same endpoint here; only Neon distinguishes them.
+      DATABASE_URL: postgresql://sentinel:sentinel@localhost:5432/sentinel
+      DATABASE_URL_UNPOOLED: postgresql://sentinel:sentinel@localhost:5432/sentinel
+      REDIS_URL: redis://localhost:6379/0
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      # Applied twice on purpose: the migration and the seed both claim to be
+      # idempotent (PLAN 0.4), and a second clean run is what proves it.
+      - name: Apply schema and seed
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/001_init.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/001_init.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/seed.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/seed.sql
+
+      - name: Schema is what 0.4 specified
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc \
+            "select count(*) from information_schema.tables where table_schema = 'public'" \
+            | grep -qx 8
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc \
+            "select count(*) from pg_enum e join pg_type t on t.oid = e.enumtypid
+             where t.typname = 'call_state'" \
+            | grep -qx 8
+
+      - name: Install workspace
+        run: uv sync
+
+      - name: pytest
+        run: uv run pytest -q
