@@ -9,39 +9,29 @@ turns up 35 ms later, 15 ms of network jitter or buffering has crept in, and
 
 What it deliberately is not: absolute one-way network latency. That needs the
 browser and the server to share a clock, which they do not. The absolute figure
-comes from the round trip in `tools/echo_probe.py`, and 4.3 pairs this with the
-WebRTC RTT to split it into directions.
+comes from the round trip in `tools/echo_probe.py`.
 
-`call_id` is minted per connection here. From 3.6 the orchestrator mints it
-instead and it ties the browser click, the trace and the audit rows together —
-this module only needs it to be the same value for the life of one call.
+One line per frame is fifty lines a second, which is what 1.3 asks for and is
+usable at this phase. 4.4 turns these into metrics; do not add aggregation here
+before then.
 """
 
-import statistics
 import time
 
 from loguru import logger
 from pipecat.frames.frames import Frame, InputAudioRawFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
-# Per-frame lines are TRACE because there are fifty of them a second; the
-# periodic summary at INFO is the one you actually read. AGENT_LOG_LEVEL=TRACE
-# turns the individual lines on (see main.py).
-SUMMARY_EVERY_SECS = 2.0
-
 
 class FrameTimingProcessor(FrameProcessor):
-    """Log `net_ms` for every inbound audio frame, and a summary as it goes."""
+    """Log `net_ms` for every inbound audio frame."""
 
-    def __init__(self, call_id: str, *, summary_every: float = SUMMARY_EVERY_SECS, **kwargs):
+    def __init__(self, call_id: str, **kwargs):
         super().__init__(**kwargs)
         self._call_id = call_id
-        self._summary_every = summary_every
         self._baseline: float | None = None
         self._sample_rate = 0
         self._samples = 0
-        self._window: list[float] = []
-        self._window_opened = 0.0
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Time inbound audio, then pass everything through untouched."""
@@ -57,29 +47,10 @@ class FrameTimingProcessor(FrameProcessor):
             # The first frame defines "on time", so its own net_ms is 0 and the
             # transport's startup cost is excluded rather than smeared in.
             self._baseline = now
-            self._window_opened = now
             self._sample_rate = frame.sample_rate
 
         expected = self._samples / self._sample_rate
         net_ms = ((now - self._baseline) - expected) * 1000
         self._samples += frame.num_frames
 
-        logger.trace("call_id={} net_ms={:.1f}", self._call_id, net_ms)
-        self._window.append(net_ms)
-
-        if now - self._window_opened >= self._summary_every:
-            self._flush(now)
-
-    def _flush(self, now: float) -> None:
-        ordered = sorted(self._window)
-        p95 = ordered[min(int(len(ordered) * 0.95), len(ordered) - 1)]
-        logger.info(
-            "call_id={} frames={} net_ms p50={:.1f} p95={:.1f} max={:.1f}",
-            self._call_id,
-            len(ordered),
-            statistics.median(ordered),
-            p95,
-            ordered[-1],
-        )
-        self._window.clear()
-        self._window_opened = now
+        logger.debug("call_id={} net_ms={:.1f}", self._call_id, net_ms)

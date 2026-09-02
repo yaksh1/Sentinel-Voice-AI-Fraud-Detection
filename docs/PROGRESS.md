@@ -56,7 +56,7 @@ services/*/               4 FastAPI apps with /health and /metrics
 |---|---|---|---|---|---|---|
 | 1.1 | `agent`: Pipecat pipeline with SmallWebRTC transport, echo processor | P0 | ✅ | 2026-09-02 13:50 | Audio round trip measured, not guessed: `tools/echo_probe.py` sends eight 440 Hz bursts as a real WebRTC peer and times the return. 8/8 echoed, **median 281 ms** (278–283) across two consecutive runs. Confirmed by ear in Chrome on 2026-09-02: the delay was not noticeable, which is the done-when as written. Connect and disconnect both log; the runner cancels on disconnect with no leak | `e16f35a` |
 | 1.2 | `demo-web`: Pipecat JS client, Connect button, mic permission | P0 | ✅ Chrome | 2026-09-02 14:45 | Next.js 16 app; `npm run build`, `tsc --noEmit` and `eslint` all clean. Server side verified without a browser: CORS preflight returns the right `access-control-allow-*` for `http://localhost:3000`, and an aiortc probe speaking RTVI gets `bot-ready` back from `client-ready` — the exact exchange `PipecatClient.connect()` waits on. Chrome confirmed by ear on 2026-09-02: connected, echo heard. Safari deferred to 4.6 (B9) | `d44e69a` |
-| 1.3 | Per-frame timing: `net_ms` per audio frame with a `call_id` | P0 | ✅ | 2026-09-02 14:30 | One probe run produced **1085 per-frame TRACE lines** and 8 INFO summaries, all carrying the same `call_id` as the connect and disconnect lines. `frames=101` per 2 s confirms 20 ms frames at 50 fps. `net_ms` p50 1.7, p95 9.1, max 16.3 | `e993950` |
+| 1.3 | Per-frame timing: `net_ms` per audio frame with a `call_id` | P0 | ✅ | 2026-09-02 14:52 | One probe run produces **1085 per-frame lines at DEBUG**, all carrying the same `call_id` as the connect and disconnect lines, at 50 fps. Re-verified after the simplification below | `e993950`, simplified in *(this commit)* |
 | 1.4 | Text transport through the same pipeline | P1 | ✅ | 2026-09-02 14:40 | Typed text echoes through the *running* pipeline, not a parallel one: probe sends RTVI `client-message {t: text-input}` and gets `server-message {type: text-echo, text: hello}` back, with `echo: text in 'hello'` logged from `EchoProcessor` in between. Re-run with **no audio track at all** — the declined-mic case — and it still works | *(this commit)* |
 | 1.5 | Decide: text mode reuses `session.create` | P1 | ✅ | 2026-09-02 14:45 | Decision paragraph appended to [BRIEF §10](BRIEF.md) and the row closed in [ARCHITECTURE §14](ARCHITECTURE.md): **reuse**. 1.4 made it near-free, so the argument reduces to not building the authority model twice | *(this commit)* |
 
@@ -70,8 +70,8 @@ that number:
   probe's own aiortc stack** — jitter buffer and opus at both ends of the loop,
   measured against a bare aiortc relay with no pipeline in it as a control. The
   pipeline's own contribution is therefore ~120 ms. A browser's WebRTC
-  implementation is better tuned than aiortc's, so what you hear at `/dev`
-  should sit below what the probe prints.
+  implementation is better tuned than aiortc's, so what you hear in the
+  browser should sit below what the probe prints.
 - **`audio_out_10ms_chunks=2` is a measured change, not a preference.** Stock
   Pipecat buffers 40 ms of output; halving it moved the median 297 → 281 ms and
   tightened the spread from 295–311 ms to 278–283 ms.
@@ -85,8 +85,7 @@ that number:
 
 ```
 services/agent/sentinel_agent/echo.py          EchoProcessor + one runner per connection
-services/agent/sentinel_agent/main.py          /api/offer signalling, /dev page, lifespan cleanup
-services/agent/sentinel_agent/dev_client.html  ~90 lines of vanilla WebRTC, no build step
+services/agent/sentinel_agent/main.py          /api/offer signalling, lifespan cleanup
 services/agent/tools/echo_probe.py             the measurement above, re-runnable
 ```
 
@@ -158,6 +157,35 @@ The check worth keeping: an offer carrying **only a data channel** — no audio
 track, the visitor who declined the microphone — still completes the RTVI
 handshake and echoes typed text. Pipecat logs `Audio transceiver not found` as
 a warning and carries on.
+
+### Simplification pass against CLAUDE.md §2/§3 (2026-09-02)
+
+Phase 1 was audited against the repo's own rules — *minimum code that solves
+the problem, nothing speculative* and *touch only what you must* — and six
+things failed. Net **-150 lines**, no behaviour lost.
+
+| What | Why it failed | Fix |
+|---|---|---|
+| `/dev` page + `dev_client.html` | Orphaned by 1.2. Its own docstring said "Replaced by demo-web in 1.2" and then it wasn't. §3 says remove what your own changes orphan | Deleted, with the route, `DEV_CLIENT`, and two imports |
+| `timing.py` summary aggregator | p50/p95/max windows are PLAN 4.4's job. 1.3 asked for per-frame lines | Removed `_flush`, the window, `statistics` |
+| `AGENT_LOG_LEVEL` env hook | Only existed because the summary took INFO and pushed frame lines to TRACE. Remove the summary and the knob has no reason to exist. It also called `logger.remove()`, clobbering Pipecat's own sink | Deleted; frame lines log at DEBUG and are visible by default |
+| `summary_every` parameter | Configurability no caller asked for | Deleted |
+| `run_echo_bot(..., call_id=None)` | An optional parameter for a caller that arrives in 3.6. Writing for a future caller is the definition of speculative | `call_id` is minted inside |
+| Comma-split parsing of `ICE_SERVERS` / `DEMO_WEB_ORIGIN` | Parsed N values where exactly one is used. The env var itself is fine — those genuinely differ dev vs prod — the list handling was not | Single value each |
+
+One comment was also rewritten: `EchoProcessor` forwards the original audio
+frame, and the docstring justified that as "non-destructive for anything added
+downstream later". The real reason is that it is a `SystemFrame` and the
+pipeline's bookkeeping rides on those. Behaviour unchanged, honesty improved.
+
+**Kept deliberately, against a literal reading of §2:** `tools/echo_probe.py`.
+It is beyond what any task asked for, but it is not a product feature — it is
+the evidence for a numeric done-when, and this file's own convention is that
+the Evidence column records a check rather than an intent. It also paid for
+itself twice, finding the `audio_out_10ms_chunks` win and catching B7.
+
+Re-verified after the pass: audio round trip 282 ms, text echo returns, CORS
+preflight unchanged, `/dev` now 404s.
 
 ---
 
@@ -274,8 +302,8 @@ a warning and carries on.
 - The seeded verification factors are last4 `4242` and city of birth `Porto`, on customer `00000000-…-0001`.
 - **Restarting the agent:** free port 8003 first and check the log for `10048` before believing any
   measurement taken against it (B7). The probe's `pc_id` should end in `#0` on a fresh process.
-- **`/dev` is a stopgap.** It exists so 1.1 could be checked without 1.2; `demo-web` replaces it.
-  It has no text box — that lives only in `demo-web` (1.4).
+- **The agent has no browser page of its own.** `/dev` existed only so 1.1 could be checked
+  before `demo-web` did; it was deleted once 1.2 landed. Run `demo-web` to talk to the agent.
 - **Running the demo:** agent on 8003 and `npm run dev` in `services/demo-web` for 3000. Both are
   needed; Connect fails with a CORS or connection error if the agent is down.
 - **demo-web is not in CI.** The `test` job is Python only, so a TypeScript or build break in

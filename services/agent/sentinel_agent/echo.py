@@ -34,8 +34,8 @@ class EchoProcessor(FrameProcessor):
     emits `InputAudioRawFrame` (a SystemFrame) and the output transport only
     ever plays `OutputAudioRawFrame`, so a bare input -> output pipeline
     connects and stays silent. Re-wrapping the same PCM bytes in the output
-    frame *is* the echo. The original frame is forwarded as well, so the
-    processor stays non-destructive for anything added downstream later.
+    frame *is* the echo. The original frame is forwarded too because it is a
+    SystemFrame and the pipeline's own bookkeeping rides on those.
 
     The text half (PLAN 1.4) needs no second transport and no second pipeline.
     `PipelineWorker` prepends its `RTVIProcessor` above everything here, so a
@@ -65,16 +65,14 @@ class EchoProcessor(FrameProcessor):
             await self.push_frame(RTVIServerMessageFrame(data={"type": TEXT_ECHO, "text": text}))
 
 
-async def run_echo_bot(connection: SmallWebRTCConnection, call_id: str | None = None) -> None:
+async def run_echo_bot(connection: SmallWebRTCConnection) -> None:
     """Run one echo pipeline for one peer connection, until the client leaves.
 
     Called as a FastAPI background task, so it starts only after the SDP answer
     has gone back to the browser. One runner per connection: in 3.7 the agent
     holds up to three of these at once plus one pre-warmed.
-
-    `call_id` is minted here for now; from 3.6 the orchestrator supplies it.
     """
-    call_id = call_id or str(uuid.uuid4())
+    call_id = str(uuid.uuid4())
     transport = SmallWebRTCTransport(
         webrtc_connection=connection,
         params=TransportParams(

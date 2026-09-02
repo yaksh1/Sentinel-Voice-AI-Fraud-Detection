@@ -3,20 +3,16 @@
     uv run uvicorn sentinel_agent.main:app --port <port>
 
 /health is the liveness probe and /metrics is Prometheus text (PLAN 0.6).
-/api/offer is the WebRTC signalling endpoint the browser negotiates against,
-and /dev is a throwaway page to exercise it (PLAN 1.1). Everything else this
-service does arrives in later phases — see services/agent/README.md.
+/api/offer is the WebRTC signalling endpoint the browser negotiates against
+(PLAN 1.1). Everything else this service does arrives in later phases — see
+services/agent/README.md.
 """
 
 import os
-import sys
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
-from loguru import logger
 from pipecat.transports.smallwebrtc.connection import IceServer, SmallWebRTCConnection
 from pipecat.transports.smallwebrtc.request_handler import (
     SmallWebRTCPatchRequest,
@@ -29,33 +25,17 @@ from sentinel_agent.echo import run_echo_bot
 
 SERVICE = "agent"
 
-# Pipecat configures loguru at DEBUG, which hides the per-frame timing lines
-# (TRACE — fifty a second, see timing.py). Set AGENT_LOG_LEVEL=TRACE to see
-# them; the two-second summaries are INFO and always visible.
-LOG_LEVEL = os.getenv("AGENT_LOG_LEVEL")
-if LOG_LEVEL:
-    logger.remove()
-    logger.add(sys.stderr, level=LOG_LEVEL)
-
 # Without a STUN server the agent only ever offers host candidates, which is
 # fine on localhost and fails the moment the browser is on another network —
-# the Wi-Fi risk called out in PLAN Phase 1. Comma-separated to override.
-ICE_SERVERS = [
-    IceServer(urls=url)
-    for url in os.getenv("ICE_SERVERS", "stun:stun.l.google.com:19302").split(",")
-    if url
-]
+# the Wi-Fi risk called out in PLAN Phase 1.
+ICE_SERVER = os.getenv("ICE_SERVERS", "stun:stun.l.google.com:19302")
 
 # demo-web is served from another origin, so the browser preflights the offer
 # POST before it will send it. Only signalling crosses origins — WebRTC media
-# is not subject to CORS at all. Comma-separated to override.
-ALLOWED_ORIGINS = [
-    origin for origin in os.getenv("DEMO_WEB_ORIGIN", "http://localhost:3000").split(",") if origin
-]
+# is not subject to CORS at all.
+DEMO_WEB_ORIGIN = os.getenv("DEMO_WEB_ORIGIN", "http://localhost:3000")
 
-DEV_CLIENT = Path(__file__).parent / "dev_client.html"
-
-webrtc = SmallWebRTCRequestHandler(ice_servers=ICE_SERVERS or None)
+webrtc = SmallWebRTCRequestHandler(ice_servers=[IceServer(urls=ICE_SERVER)])
 
 
 @asynccontextmanager
@@ -69,7 +49,7 @@ app = FastAPI(title=SERVICE, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=[DEMO_WEB_ORIGIN],
     allow_methods=["POST", "PATCH", "OPTIONS"],
     allow_headers=["Content-Type"],
 )
@@ -109,9 +89,3 @@ async def ice_candidate(request: SmallWebRTCPatchRequest) -> dict[str, str]:
     """Accept trickled ICE candidates for an offer already answered."""
     await webrtc.handle_patch_request(request)
     return {"status": "success"}
-
-
-@app.get("/dev", include_in_schema=False)
-def dev_client() -> HTMLResponse:
-    """Bare WebRTC page for checking the echo by ear. Replaced by demo-web in 1.2."""
-    return HTMLResponse(DEV_CLIENT.read_text(encoding="utf-8"))

@@ -36,10 +36,9 @@ uv run uvicorn sentinel_agent.main:app --port 8003
 | `GET /metrics` | Prometheus text |
 | `POST /api/offer` | WebRTC signalling — answers a browser's SDP offer and starts a pipeline behind it |
 | `PATCH /api/offer` | Trickled ICE candidates for an offer already answered |
-| `GET /dev` | Bare page that connects to the above so the echo can be checked by ear. Superseded by `demo-web` in 1.2 |
 
-Open <http://localhost:8003/dev> in a browser, wear headphones, and click Connect.
-For a number rather than an impression:
+Run `demo-web` alongside it to talk to the agent from a browser. For a number
+rather than an impression:
 
 ```
 uv run python services/agent/tools/echo_probe.py
@@ -49,15 +48,15 @@ Set `ICE_SERVERS` (comma-separated) to override the default STUN server; only
 host candidates are needed when the browser is on the same machine.
 `DEMO_WEB_ORIGIN` lists the origins allowed to post an offer.
 
-Per-frame arrival timing is on at INFO as a summary every two seconds:
+Every inbound audio frame logs its arrival timing at DEBUG:
 
 ```
-call_id=3e24557b-… frames=101 net_ms p50=1.7 p95=9.1 max=16.3
+call_id=fd357ca9-… net_ms=-5.4
 ```
 
-`AGENT_LOG_LEVEL=TRACE` adds the individual frame lines — fifty a second, so
-they are off by default. See `sentinel_agent/timing.py` for what `net_ms`
-measures, and what it deliberately does not.
+Fifty lines a second, which is what PLAN 1.3 asks for; 4.4 turns them into
+metrics. See `sentinel_agent/timing.py` for what `net_ms` measures and what it
+deliberately does not.
 
 ## Status
 
