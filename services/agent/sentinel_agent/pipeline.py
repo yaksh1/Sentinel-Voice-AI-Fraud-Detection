@@ -34,6 +34,7 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
+from pipecat.turns.user_mute import MuteUntilFirstBotCompleteUserMuteStrategy
 from pipecat.workers.runner import WorkerRunner
 
 from sentinel_agent.timing import FrameTimingProcessor
@@ -162,14 +163,24 @@ async def run_agent(connection: SmallWebRTCConnection) -> None:
     )
 
     context = LLMContext()
-    # Without a VAD analyzer the aggregator ends a user turn on every final
-    # transcript, and Deepgram splits even "Yes, now is a good time." into two.
-    # The second transcript then interrupts the reply to the first, so the
-    # caller is never answered. VAD makes silence, not punctuation, decide when
-    # a turn is over.
+    # Two settings, for two different failures.
+    #
+    # VAD: without it the aggregator ends a user turn on every final transcript,
+    # and Deepgram splits even "Yes, now is a good time." into two. The second
+    # transcript then interrupts the reply to the first, so the caller is never
+    # answered. VAD makes silence, not punctuation, decide when a turn is over.
+    #
+    # Mute-until-first-bot-complete: the consent line is a disclosure, and a
+    # caller who says "hello?" over the top of it truncated it mid-sentence —
+    # after which the agent went on to ask for card details, which is precisely
+    # what the disclosure exists to warn them about. The caller is muted until
+    # it has been delivered in full. Interruption is allowed everywhere after.
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+        user_params=LLMUserAggregatorParams(
+            vad_analyzer=SileroVADAnalyzer(),
+            user_mute_strategies=[MuteUntilFirstBotCompleteUserMuteStrategy()],
+        ),
     )
 
     pipeline = Pipeline(

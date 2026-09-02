@@ -315,6 +315,33 @@ phrasing or a promised callback in spoken output.
 cooperative input. Every one of these defects needed a real person being
 unhelpful. Probes prove the plumbing; they do not prove the persona.
 
+### 2.2 follow-up 2: a disclosure must not be interruptible
+
+Reported from a second listen: the tester talked over the consent line, it cut
+off mid-sentence, and the agent went straight on to asking for card details.
+
+That is not the model being unintelligent — it is a compliance defect I built.
+The consent line tells the caller the call is not recorded and that they will
+never be asked for a full card number or PIN. Truncating it and then asking for
+card details is exactly the sequence the disclosure exists to prevent, and a
+caller who has been trained by it to expect that reassurance never heard it.
+
+Fixed with `MuteUntilFirstBotCompleteUserMuteStrategy` on the user aggregator:
+the caller is muted from connect until the first bot turn finishes, so the
+disclosure always lands in full. Interruption stays enabled everywhere after it,
+which is the behaviour you want for the rest of a call.
+
+Verified by talking over it from the first moment: `user is now muted`, the full
+consent line in the TTS log, then `user is now unmuted`. Speech during the
+disclosure is discarded rather than queued, so the agent then waits — a real
+caller repeats themselves, which is the right shape.
+
+**The pattern worth noting:** both defects from real listening were the same
+kind. Not "the model said something wrong", but "I gave the model, or the
+pipeline, an authority it should not have had" — first the freedom to open the
+call however it liked, then the freedom to have its disclosure cut short. BRIEF
+§5's "enforced in code, not in the prompt" is a broader rule than it looks.
+
 ---
 
 ## Blockers
