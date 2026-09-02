@@ -162,7 +162,7 @@ a warning and carries on.
 
 Phase 1 was audited against the repo's own rules — *minimum code that solves
 the problem, nothing speculative* and *touch only what you must* — and six
-things failed. Net **-150 lines**, no behaviour lost.
+things failed. Net **-161 lines** of agent code, no behaviour lost.
 
 | What | Why it failed | Fix |
 |---|---|---|
