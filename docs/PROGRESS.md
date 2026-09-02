@@ -11,7 +11,7 @@ Running log of what is actually done, verified how, and what got in the way.
 | Phase | Scope | Status |
 |---|---|---|
 | 0 · Bootstrap | 6 tasks (5 P0, 1 P1) | **✅ Complete** — every done-when verified, including the Redis half of 0.3 (B1 resolved) |
-| 1 · Transport skeleton | 5 tasks | **In progress** — 1.1 ✅ · 1.2 built, Chrome check outstanding; Safari deferred to 4.6 (B9) |
+| 1 · Transport skeleton | 5 tasks | **In progress** — 1.1 ✅ · 1.3 ✅ · 1.2 built, Chrome check outstanding; Safari deferred to 4.6 (B9) |
 | 2 · First conversation | 7 tasks | Not started |
 | 3 · State machine + pipeline | 11 tasks | Not started |
 | 4 · Demo + observability | 7 tasks | Not started |
@@ -54,7 +54,7 @@ services/*/               4 FastAPI apps with /health and /metrics
 |---|---|---|---|---|---|---|
 | 1.1 | `agent`: Pipecat pipeline with SmallWebRTC transport, echo processor | P0 | ✅ | 2026-09-02 13:50 | Audio round trip measured, not guessed: `tools/echo_probe.py` sends eight 440 Hz bursts as a real WebRTC peer and times the return. 8/8 echoed, **median 281 ms** (278–283) across two consecutive runs. Connect and disconnect both log; the runner cancels on disconnect with no leak | *(this commit)* |
 | 1.2 | `demo-web`: Pipecat JS client, Connect button, mic permission | P0 | ⚠️ Partial | 2026-09-02 14:20 | Next.js 16 app; `npm run build`, `tsc --noEmit` and `eslint` all clean. Server side verified without a browser: CORS preflight returns the right `access-control-allow-*` for `http://localhost:3000`, and an aiortc probe speaking RTVI gets `bot-ready` back from `client-ready` — the exact exchange `PipecatClient.connect()` waits on. **The Chrome/Safari listening test is not done** — see B8 and B9 | *(this commit)* |
-| 1.3 | Per-frame timing: `net_ms` per audio frame with a `call_id` | P0 | Not started | — | — | — |
+| 1.3 | Per-frame timing: `net_ms` per audio frame with a `call_id` | P0 | ✅ | 2026-09-02 14:30 | One probe run produced **1085 per-frame TRACE lines** and 8 INFO summaries, all carrying the same `call_id` as the connect and disconnect lines. `frames=101` per 2 s confirms 20 ms frames at 50 fps. `net_ms` p50 1.7, p95 9.1, max 16.3 | *(this commit)* |
 | 1.4 | Text transport through the same pipeline | P1 | Not started | — | — | — |
 | 1.5 | Decide: text mode reuses `session.create` | P1 | Not started | — | — | — |
 
@@ -116,6 +116,23 @@ Two things were worth finding out before writing the page:
   posts the offer to `:8003`, so the browser preflights it. Only signalling
   crosses origins; WebRTC media is not subject to CORS at all, which is why the
   allowed methods are just `POST, PATCH, OPTIONS`.
+
+### What 1.3 measures, and what it found
+
+`net_ms` is how far behind the media clock a frame is when it reaches the
+pipeline. The first frame sets the baseline; every frame after it is compared
+against where its sample count says it should have arrived. It is **not**
+absolute one-way latency — that needs a shared clock between browser and
+server, which does not exist. The absolute number stays with the round trip in
+`tools/echo_probe.py`, and 4.3 pairs the two with the WebRTC RTT to split them
+by direction.
+
+The first measurement is already useful: **`net_ms` does not grow**. Over 16
+seconds and 1085 frames the p50 stayed near 1.7 ms and the max never passed
+16 ms, so the input side is keeping up with real time and no buffer is
+quietly filling. That places essentially none of the ~281 ms round trip on the
+inbound path — it is opus, the jitter buffers at both ends, and output pacing.
+Worth knowing before Phase 2 starts adding STT to this same path.
 
 ---
 

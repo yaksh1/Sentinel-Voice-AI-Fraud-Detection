@@ -6,6 +6,8 @@ this shape and changes only the middle — 2.1 replaces EchoProcessor with
 STT -> LLM -> TTS, and 3.1 puts the state machine validator beside it.
 """
 
+import uuid
+
 from loguru import logger
 from pipecat.frames.frames import Frame, InputAudioRawFrame, OutputAudioRawFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -15,6 +17,8 @@ from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 from pipecat.workers.runner import WorkerRunner
+
+from sentinel_agent.timing import FrameTimingProcessor
 
 
 class EchoProcessor(FrameProcessor):
@@ -44,13 +48,16 @@ class EchoProcessor(FrameProcessor):
             )
 
 
-async def run_echo_bot(connection: SmallWebRTCConnection) -> None:
+async def run_echo_bot(connection: SmallWebRTCConnection, call_id: str | None = None) -> None:
     """Run one echo pipeline for one peer connection, until the client leaves.
 
     Called as a FastAPI background task, so it starts only after the SDP answer
     has gone back to the browser. One runner per connection: in 3.7 the agent
     holds up to three of these at once plus one pre-warmed.
+
+    `call_id` is minted here for now; from 3.6 the orchestrator supplies it.
     """
+    call_id = call_id or str(uuid.uuid4())
     transport = SmallWebRTCTransport(
         webrtc_connection=connection,
         params=TransportParams(
@@ -65,7 +72,14 @@ async def run_echo_bot(connection: SmallWebRTCConnection) -> None:
         ),
     )
 
-    pipeline = Pipeline([transport.input(), EchoProcessor(), transport.output()])
+    pipeline = Pipeline(
+        [
+            transport.input(),
+            FrameTimingProcessor(call_id),
+            EchoProcessor(),
+            transport.output(),
+        ]
+    )
     worker = PipelineWorker(pipeline, params=PipelineParams(enable_metrics=True))
 
     # handle_sigint=False: uvicorn owns the process signals, and a per-call
@@ -75,11 +89,11 @@ async def run_echo_bot(connection: SmallWebRTCConnection) -> None:
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(_transport, _client):
-        logger.info("echo: client connected (pc_id={})", connection.pc_id)
+        logger.info("echo: client connected (call_id={} pc_id={})", call_id, connection.pc_id)
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(_transport, _client):
-        logger.info("echo: client disconnected (pc_id={})", connection.pc_id)
+        logger.info("echo: client disconnected (call_id={} pc_id={})", call_id, connection.pc_id)
         await runner.cancel()
 
     await runner.run()

@@ -9,12 +9,14 @@ service does arrives in later phases — see services/agent/README.md.
 """
 
 import os
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from loguru import logger
 from pipecat.transports.smallwebrtc.connection import IceServer, SmallWebRTCConnection
 from pipecat.transports.smallwebrtc.request_handler import (
     SmallWebRTCPatchRequest,
@@ -26,6 +28,14 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sentinel_agent.echo import run_echo_bot
 
 SERVICE = "agent"
+
+# Pipecat configures loguru at DEBUG, which hides the per-frame timing lines
+# (TRACE — fifty a second, see timing.py). Set AGENT_LOG_LEVEL=TRACE to see
+# them; the two-second summaries are INFO and always visible.
+LOG_LEVEL = os.getenv("AGENT_LOG_LEVEL")
+if LOG_LEVEL:
+    logger.remove()
+    logger.add(sys.stderr, level=LOG_LEVEL)
 
 # Without a STUN server the agent only ever offers host candidates, which is
 # fine on localhost and fails the moment the browser is on another network —

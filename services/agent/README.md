@@ -47,6 +47,17 @@ uv run python services/agent/tools/echo_probe.py
 
 Set `ICE_SERVERS` (comma-separated) to override the default STUN server; only
 host candidates are needed when the browser is on the same machine.
+`DEMO_WEB_ORIGIN` lists the origins allowed to post an offer.
+
+Per-frame arrival timing is on at INFO as a summary every two seconds:
+
+```
+call_id=3e24557b-… frames=101 net_ms p50=1.7 p95=9.1 max=16.3
+```
+
+`AGENT_LOG_LEVEL=TRACE` adds the individual frame lines — fifty a second, so
+they are off by default. See `sentinel_agent/timing.py` for what `net_ms`
+measures, and what it deliberately does not.
 
 ## Status
 
