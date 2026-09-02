@@ -52,7 +52,7 @@ services/*/               4 FastAPI apps with /health and /metrics
 
 ### B1 · No container runtime — Redis cannot run locally · **RESOLVED**
 
-- **Hit:** 2026-09-01 22:42, during 0.3. **Cleared:** %s.
+- **Hit:** 2026-09-01 22:42, during 0.3. **Cleared:** 2026-09-02 12:53.
 - **Symptom:** `docker: command not found` in both shells; `C:\Program Files\Docker\Docker\Docker Desktop.exe` absent; `wsl -l -v` → "has no installed distributions".
 - **Impact while open:** the `redis-cli XINFO STREAM fraud.alert` half of 0.3 was unverified and `docker-compose.yml` was unproven.
 - **Resolution:** installed Docker Desktop 4.89.0 with `winget install --id Docker.DockerDesktop`. Three things went sideways on the way, all worth knowing:
@@ -87,7 +87,7 @@ services/*/               4 FastAPI apps with /health and /metrics
 ### B6 · `docker compose` could not pull images — credential helper not found · **RESOLVED**
 
 - **Hit:** 2026-09-02 12:53, immediately after the engine came up.
-- **Symptom:** `docker compose up -d` failed with `error getting credentials - err: exec: "docker-credential-desktop": executable file not found in %PATH%`. Docker's config sets `credsStore: desktop`, and that helper ships in Docker Desktop's own `resourcesin`.
+- **Symptom:** `docker compose up -d` failed with `error getting credentials - err: exec: "docker-credential-desktop": executable file not found in %PATH%`. Docker's config sets `credsStore: desktop`, and that helper ships in Docker Desktop's own `resources\bin`.
 - **Resolution:** prepended that directory to `PATH` for the shell rather than editing `~/.docker/config.json` — the config is right, the shell's environment was stale. The installer *does* add the directory to the persistent user PATH, so this only affects shells that were already running when Docker was installed.
 
 ---
