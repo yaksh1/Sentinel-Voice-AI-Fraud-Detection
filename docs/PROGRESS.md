@@ -11,7 +11,7 @@ Running log of what is actually done, verified how, and what got in the way.
 | Phase | Scope | Status |
 |---|---|---|
 | 0 · Bootstrap | 6 tasks (5 P0, 1 P1) | **✅ Complete** — every done-when verified, including the Redis half of 0.3 (B1 resolved) |
-| 1 · Transport skeleton | 5 tasks | **In progress** — 1.1 ✅ |
+| 1 · Transport skeleton | 5 tasks | **In progress** — 1.1 ✅ · 1.2 built, browser check outstanding (B8, B9) |
 | 2 · First conversation | 7 tasks | Not started |
 | 3 · State machine + pipeline | 11 tasks | Not started |
 | 4 · Demo + observability | 7 tasks | Not started |
@@ -53,7 +53,7 @@ services/*/               4 FastAPI apps with /health and /metrics
 | # | Task | Pri | Status | Verified | Evidence | Commit |
 |---|---|---|---|---|---|---|
 | 1.1 | `agent`: Pipecat pipeline with SmallWebRTC transport, echo processor | P0 | ✅ | 2026-09-02 13:50 | Audio round trip measured, not guessed: `tools/echo_probe.py` sends eight 440 Hz bursts as a real WebRTC peer and times the return. 8/8 echoed, **median 281 ms** (278–283) across two consecutive runs. Connect and disconnect both log; the runner cancels on disconnect with no leak | *(this commit)* |
-| 1.2 | `demo-web`: Pipecat JS client, Connect button, mic permission | P0 | Not started | — | — | — |
+| 1.2 | `demo-web`: Pipecat JS client, Connect button, mic permission | P0 | ⚠️ Partial | 2026-09-02 14:20 | Next.js 16 app; `npm run build`, `tsc --noEmit` and `eslint` all clean. Server side verified without a browser: CORS preflight returns the right `access-control-allow-*` for `http://localhost:3000`, and an aiortc probe speaking RTVI gets `bot-ready` back from `client-ready` — the exact exchange `PipecatClient.connect()` waits on. **The Chrome/Safari listening test is not done** — see B8 and B9 | *(this commit)* |
 | 1.3 | Per-frame timing: `net_ms` per audio frame with a `call_id` | P0 | Not started | — | — | — |
 | 1.4 | Text transport through the same pipeline | P1 | Not started | — | — | — |
 | 1.5 | Decide: text mode reuses `session.create` | P1 | Not started | — | — | — |
@@ -92,6 +92,30 @@ services/agent/tools/echo_probe.py             the measurement above, re-runnabl
 `InputAudioRawFrame` (a `SystemFrame`) and the output transport only ever plays
 `OutputAudioRawFrame`, so `Pipeline([transport.input(), transport.output()])`
 connects and sits there in silence. Re-wrapping the same PCM bytes *is* the echo.
+
+### What 1.2 produced
+
+```
+services/demo-web/app/voice-widget.tsx   the client component: Connect, mic, <audio>
+services/demo-web/app/page.tsx           renders it
+services/demo-web/app/layout.tsx         title + globals.css
+services/demo-web/next.config.ts         turbopack.root, agentRules: false
+services/agent/.../main.py               CORSMiddleware (the one server change 1.2 needed)
+```
+
+Two things were worth finding out before writing the page:
+
+- **The agent needed no RTVI code.** `PipecatClient.connect()` does not resolve
+  when the peer connection opens — it sends `client-ready` over a data channel
+  and waits for `bot-ready`. Our 1.1 echo pipeline never mentions RTVI, so this
+  looked like a required server change. It is not: `PipelineWorker` sets
+  `enable_rtvi=True` by default, prepends an `RTVIProcessor`, adds the observer,
+  and wires `on_client_ready → set_bot_ready()` itself. Verified, not assumed —
+  the probe gets `bot-ready {"version": "2.1.0", "library": "pipecat-ai"}`.
+- **CORS was a required server change.** demo-web is served from `:3000` and
+  posts the offer to `:8003`, so the browser preflights it. Only signalling
+  crosses origins; WebRTC media is not subject to CORS at all, which is why the
+  allowed methods are just `POST, PATCH, OPTIONS`.
 
 ---
 
@@ -162,6 +186,36 @@ connects and sits there in silence. Re-wrapping the same PCM bytes *is* the echo
   median — 297 → 281 ms.
 - **Worth keeping:** a negative result from an A/B needs proof the B ever ran.
 
+### B8 · `/browse` cannot run on this machine · **OPEN (worked around)**
+
+- **Hit:** 2026-09-02 14:15, verifying 1.2.
+- **Symptom:** `browse.exe` exits with "An Application Control policy has blocked
+  this file" under PowerShell, and "Permission denied" under Git Bash. The binary
+  is present and executable-flagged; Windows refuses to run it.
+- **Impact:** no headless browser QA in this environment — not for 1.2, and not
+  for 3.10 or 4.1/4.2 either, which are all browser-facing.
+- **Worked around for 1.2** by verifying the server side directly: `curl` for the
+  CORS preflight, and an aiortc probe speaking RTVI over a data channel for the
+  `client-ready`/`bot-ready` exchange. That covers everything except the browser
+  half, which now needs a human.
+
+### B9 · No Safari, and none reachable · **OPEN**
+
+- **Hit:** 2026-09-02 14:20, at 1.2's done-when.
+- **Symptom:** 1.2 requires "echo works from Chrome and Safari". This is Windows;
+  Safari has not shipped for Windows since 2012, so the Safari half cannot be
+  checked here at all.
+- **Why it is not cosmetic:** Safari is the one engine with materially different
+  WebRTC behaviour — stricter autoplay policy on `<audio>` elements, and its own
+  codec negotiation. It is also every iPhone browser, including Chrome for iOS.
+  A demo that rings a phone (PLAN 4.6) is a Safari demo.
+- **The obstacle beyond hardware:** `getUserMedia` requires a secure context, so
+  a phone on the LAN cannot use the mic against `http://<lan-ip>:3000`. Testing
+  on a real iPhone needs HTTPS — a tunnel (cloudflared/ngrok) or a local cert —
+  which is most of PLAN 4.6 pulled forward.
+- **Status:** needs a decision. Neither browser has been listened to yet — Chrome is a
+  five-minute check for whoever has the machine, Safari needs hardware this box does not have.
+
 ---
 
 ## Notes for the next session
@@ -174,3 +228,7 @@ connects and sits there in silence. Re-wrapping the same PCM bytes *is* the echo
 - **Restarting the agent:** free port 8003 first and check the log for `10048` before believing any
   measurement taken against it (B7). The probe's `pc_id` should end in `#0` on a fresh process.
 - **`/dev` is a stopgap.** It exists so 1.1 could be checked without 1.2; `demo-web` replaces it.
+- **Running the demo:** agent on 8003 and `npm run dev` in `services/demo-web` for 3000. Both are
+  needed; Connect fails with a CORS or connection error if the agent is down.
+- **demo-web is not in CI.** The `test` job is Python only, so a TypeScript or build break in
+  `services/demo-web` would not be caught. Worth a third job before Phase 4 adds real UI.

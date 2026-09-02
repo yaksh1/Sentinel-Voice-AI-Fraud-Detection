@@ -24,8 +24,28 @@ Public sandbox front end: the fake checkout, the voice widget (mic or text), and
 
 ## Run
 
-No runtime yet — the Next.js app is created in [PLAN](../../docs/PLAN.md) 1.2.
+```
+npm install
+npm run dev          # http://localhost:3000
+```
+
+The agent must be running too, or Connect has nothing to negotiate with:
+
+```
+uv run uvicorn sentinel_agent.main:app --port 8003
+```
+
+| Variable | Default | Notes |
+|---|---|---|
+| `NEXT_PUBLIC_AGENT_OFFER_URL` | `http://localhost:8003/api/offer` | Put overrides in `.env.local`. `NEXT_PUBLIC_` is required — the browser reads it |
+
+The agent must allow this origin (`DEMO_WEB_ORIGIN`, default `http://localhost:3000`):
+the offer POST is cross-origin and the browser preflights it. The media that
+follows is not subject to CORS.
 
 ## Status
 
-Scaffold only. Built in [PLAN](../../docs/PLAN.md) 1.2 (Connect + echo), 3.10 (SSE client + ring UI), 4.1 (checkout page), 4.2 (dashboard).
+Connect works and the agent echoes you back ([PLAN](../../docs/PLAN.md) 1.2).
+`app/voice-widget.tsx` is the whole of it — a Connect button, mic permission,
+and an `<audio>` element for the returning track. Still to come: 3.10 (SSE
+client + ring UI), 4.1 (checkout page), 4.2 (dashboard).

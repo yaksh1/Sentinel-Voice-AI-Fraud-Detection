@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pipecat.transports.smallwebrtc.connection import IceServer, SmallWebRTCConnection
 from pipecat.transports.smallwebrtc.request_handler import (
@@ -35,6 +36,13 @@ ICE_SERVERS = [
     if url
 ]
 
+# demo-web is served from another origin, so the browser preflights the offer
+# POST before it will send it. Only signalling crosses origins — WebRTC media
+# is not subject to CORS at all. Comma-separated to override.
+ALLOWED_ORIGINS = [
+    origin for origin in os.getenv("DEMO_WEB_ORIGIN", "http://localhost:3000").split(",") if origin
+]
+
 DEV_CLIENT = Path(__file__).parent / "dev_client.html"
 
 webrtc = SmallWebRTCRequestHandler(ice_servers=ICE_SERVERS or None)
@@ -48,6 +56,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title=SERVICE, lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["POST", "PATCH", "OPTIONS"],
+    allow_headers=["Content-Type"],
+)
 
 
 @app.get("/health")
