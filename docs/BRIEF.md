@@ -1,4 +1,4 @@
-# BRIEF — Meridian Fraud Callback Agent
+# BRIEF — Sentinel · Voice AI Fraud Detection
 
 **One-liner:** An event-driven AI voice agent that calls a cardholder within seconds of a suspicious transaction, verifies their identity, and releases or blocks the card — replacing the "press 1 if this was you" IVR with a real conversation, built to showcase scaling, observability, and system design.
 

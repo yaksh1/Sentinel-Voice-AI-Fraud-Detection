@@ -1,4 +1,4 @@
-# PLAN — Meridian Fraud Callback Agent · v1
+# PLAN — Sentinel · Voice AI Fraud Detection · v1
 
 Derived from `BRIEF.md` (2026-09-01). One person, one weekend. Every task has a *done when* you can check without judgement, and a phase can't start until its *entry gate* is true. P0 = v1 doesn't exist without it; P1 = expected but cuttable; P2 = stretch.
 
