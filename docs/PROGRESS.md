@@ -282,6 +282,39 @@ these are cold, unbatched, first-of-connection calls and the context is tiny —
 but 2.4 exists precisely to measure this, and the number to beat is now on
 record rather than assumed.
 
+### 2.2 follow-up: three defects the first real listen found
+
+Dogfooding beat every probe I wrote. A human on a headset broke it in ways
+synthesised speech never did:
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Agent answered *"Hello, how can I help you today?"* and *"the card you're calling about"* | The prompt said what the agent **is** but never that it **placed the call**. With no direction established, an LLM falls back to inbound support, which is the overwhelmingly more common shape in training data | The prompt now opens by stating Meridian's monitoring flagged a transaction and the agent rang the cardholder, who has no request to handle — and forbids asking what they need |
+| Agent offered *"I'll call you tomorrow at twelve noon"* and then *"I've scheduled the call"* | The prompt forbade inventing **facts** (amounts, merchants) but said nothing about inventing **capabilities**. Fabricating an action is worse than fabricating a detail: the caller hangs up expecting a callback that will never come | Explicit rule: everything the agent can do happens on this call, now. No callbacks, transfers, emails or follow-ups, ever offered |
+| One reply appeared in the UI eight times | Mine, not the model's. `onBotOutput` fires repeatedly for the *same* segment as its spoken status updates; the handler appended on every event | Replace the line whose `segment_id` matches instead of appending |
+
+Also added: a rule for hostile callers, since the tester swore at it and the
+agent had no guidance. It now stays calm and points them at the number on the
+back of their card rather than arguing.
+
+Retested against the exact failure — caller says only "Hello? Hello, who is
+this?" — and the agent now leads:
+
+```
+AGENT   [consent line]
+CALLER  'Hello?' 'Who' 'this?'
+AGENT   I'm calling about your card.
+AGENT   Could you tell me the last four digits of the card and the city where
+        you were born?
+```
+
+which is BRIEF §4 step 4 almost verbatim. Zero occurrences of the inbound
+phrasing or a promised callback in spoken output.
+
+**The lesson worth keeping:** the synthesised-speech probes only ever fed it
+cooperative input. Every one of these defects needed a real person being
+unhelpful. Probes prove the plumbing; they do not prove the persona.
+
 ---
 
 ## Blockers

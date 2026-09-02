@@ -14,7 +14,7 @@ const TEXT_INPUT = "text-input";
 
 const BUSY: TransportState[] = ["initializing", "connecting", "authenticating"];
 
-type Line = { from: "you" | "agent"; text: string };
+type Line = { from: "you" | "agent"; text: string; segment?: number };
 
 export function VoiceWidget() {
   const client = useRef<PipecatClient | null>(null);
@@ -39,12 +39,22 @@ export function VoiceWidget() {
           if (participant?.local || track.kind !== "audio") return;
           if (audio.current) audio.current.srcObject = new MediaStream([track]);
         },
-        // The agent replies through the LLM now, so its words arrive as bot
-        // output over RTVI rather than as a custom echo message. Sentences
-        // stream in, so append rather than replace.
+        // The agent replies through the LLM, so its words arrive as bot output
+        // over RTVI. The same segment fires repeatedly as its spoken status
+        // updates, so replace the line with a matching segment id rather than
+        // appending — otherwise one sentence shows up eight times.
         onBotOutput: (data) => {
           if (!data?.text) return;
-          setLines((prev) => [...prev, { from: "agent", text: data.text }]);
+          const line: Line = { from: "agent", text: data.text, segment: data.segment_id };
+          setLines((prev) => {
+            const at = prev.findIndex(
+              (l) => l.from === "agent" && l.segment !== undefined && l.segment === line.segment,
+            );
+            if (at === -1) return [...prev, line];
+            const next = [...prev];
+            next[at] = line;
+            return next;
+          });
         },
       },
     });
