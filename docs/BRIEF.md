@@ -111,7 +111,7 @@ flowchart LR
 1. Page load → `demo-web` mints `visitor_id` (cookie) → opens `GET core-api/events?visitor_id=…` (SSE). `core-api` writes `conn:{visitor_id}` in Redis with a TTL refreshed by SSE heartbeats, and creates/reuses the `sandbox_sessions` row.
 2. Click *Pay $940* → `POST core-api/checkout {visitor_id, amount, merchant}` → `core-api` writes a `held` transaction and calls `risk-engine`.
 3. `risk-engine` → `XADD fraud.alert`.
-4. Orchestrator `XREADGROUP fraud.alert` → `SET NX alert:{id}` (dedupe) → rate-limit check → `DECR agent:capacity`; if the result is negative, `INCR` it back and publish `sandbox_busy` instead of `ring`. Otherwise mint `call_id`, insert `calls` row (`state = ringing`), start a 30 s ring timer, and **in parallel**:
+4. Orchestrator `XREADGROUP fraud.alert` → `SET NX alert:{id}` (dedupe) → rate-limit check → `DECR agent:capacity`; if the result is negative, `INCR` it back and publish `sandbox_busy` instead of `ring`. Otherwise mint `call_id`, insert the `calls` row through `core-api` (`state = ringing`), start a 30 s ring timer, and **in parallel**:
    - `PUBLISH ring` on the visitor's channel → `core-api` forwards over SSE → widget rings. `alert_to_ring_ms` is stamped here.
    - `XADD session.create` → agent picks it up, hands out a warm pipeline (or cold-starts one up to the cap), keeps it silent.
 5. Agent `XADD session.ready {call_id, session_url, token, expires_at}` → orchestrator `PUBLISH session_ready` → SSE → widget now has a WebRTC endpoint. `calls.state = ready`.
@@ -273,6 +273,7 @@ Guardrails: 3-min session cap, daily minute cap with "sandbox at capacity" state
 - ~~Agent concurrency?~~ → warm pool 1, max 3.
 - ~~LLM choice?~~ → two tiers: Cerebras `gpt-oss-120b` for the turn loop, Claude Sonnet 5 as escalation judge. See "Model stack".
 - ~~Postgres host?~~ → Neon (project linked 2026-09-01, branch `production`); branching replaces a local Postgres container.
+- ~~Who writes the `calls` row — the orchestrator directly, or through `core-api`?~~ → through `core-api` (2026-09-01). One writer for the table means `state_history` appends and transition legality have one implementation, shared with the agent; the cost is one internal hop inside the `alert_to_ring_ms` budget.
 
 **Still open**
 - Judge trigger policy: are both triggers worth their latency, or does validator-rejection alone carry it? Threshold and holding-line decision come out of PLAN 2.4.

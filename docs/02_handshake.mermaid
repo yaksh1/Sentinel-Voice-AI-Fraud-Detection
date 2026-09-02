@@ -19,7 +19,8 @@ sequenceDiagram
         R-->>API: sandbox_busy
         API-->>B: SSE: sandbox_busy
     else capacity ok
-        O->>O: mint call_id · calls.state = ringing · start 30 s ring timer
+        O->>O: mint call_id · start 30 s ring timer
+        O->>API: POST /internal/calls (state = ringing)
         par ring immediately
             O->>R: PUBLISH ring {call_id}  ⏱ alert_to_ring_ms
             R-->>API: ring

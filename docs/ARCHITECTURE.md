@@ -59,7 +59,7 @@ Source: [`01_architecture_overview.mermaid`](01_architecture_overview.mermaid).
 | `demo-web` | Next.js app, stateless | No — `visitor_id` cookie only | CDN / instances | none (talks only to `core-api`, and to `agent` for media) |
 | `core-api` | FastAPI, long-lived SSE connections | Yes — one open SSE per visitor, registered in Redis so *any* instance can be found | instances (the Redis registry makes this safe) | Neon, Redis |
 | `risk-engine` | FastAPI, request/response | No | instances | Redis (producer only) |
-| `call-orchestrator` | FastAPI worker, consumer group + in-process ring timers | Yes — a 30 s timer per ringing call | consumer-group members | Redis, Neon |
+| `call-orchestrator` | FastAPI worker, consumer group + in-process ring timers | Yes — a 30 s timer per ringing call | consumer-group members | Redis, `core-api` (all `calls` writes), Neon (`fraud_alerts`) |
 | `agent` | Pipecat worker, holds WebRTC media sessions | Yes — up to 3 live pipelines plus 1 warm | **capacity-bound, not instance-bound** in v1 (warm 1 / max 3) | Redis, Deepgram, Cerebras, Anthropic, Cartesia, `core-api` |
 | observability | Not a deployable service in v1 | — | — | OTel collector → Prometheus; in-app dashboard for the demo, Grafana for write-up screenshots |
 
@@ -73,7 +73,7 @@ Three rules decide where any new piece of logic goes.
 
 **1. Authority lives in the validator, never in the prompt.** The LLM proposes a state transition; code accepts or rejects it. Anything that changes money, cards, or call state passes a guard written in Python. A stronger model is a second opinion, not a bypass — see §6.
 
-**2. The orchestrator owns the call until WebRTC connects; the agent owns it after.** `calls.state` moves `ringing → ready` under the orchestrator, plus `no_answer` / `busy` if it never gets further. From `connected` onward the agent owns the row, through `in_call → completed` or `dropped`. Nothing else writes that column.
+**2. The orchestrator owns the call until WebRTC connects; the agent owns it after.** `calls.state` moves `ringing → ready` under the orchestrator, plus `no_answer` / `busy` if it never gets further. From `connected` onward the agent owns the row, through `in_call → completed` or `dropped`. Both drive the column through the *same* `core-api` endpoint (§7): owning a transition and executing the write are separate things.
 
 **3. Redis is used three ways, and they are not interchangeable.** Streams are durable work queues; pub/sub is fire-and-forget fan-out; keys are locks, registries, and counters. Choosing wrong is how this class of system breaks — a `ring` published to nobody is *correct*, a `session.create` dropped because nobody was listening is a lost call.
 
@@ -169,7 +169,8 @@ sequenceDiagram
         R-->>API: sandbox_busy
         API-->>B: SSE: sandbox_busy
     else capacity ok
-        O->>O: mint call_id · calls.state = ringing · start 30 s ring timer
+        O->>O: mint call_id · start 30 s ring timer
+        O->>API: POST /internal/calls (state = ringing)
         par ring immediately
             O->>R: PUBLISH ring {call_id}  ⏱ alert_to_ring_ms
             R-->>API: ring
@@ -320,7 +321,7 @@ Neon Postgres, one branch per environment. The schema applies idempotently ([PLA
 | `cards` | last4, status | `core-api` (tool: `block_card_and_reissue`) |
 | `transactions` | status: `pending` / `held` / `released` / `blocked` | `core-api` (checkout, tool: `release_hold`) |
 | `fraud_alerts` | `alert_id` PK, txn_id, status, attempts | `risk-engine`, `call-orchestrator` |
-| `calls` | `call_id` PK, alert_id, channel, **state**, `state_history` JSONB, outcome, `ring_at`, `ready_at`, `connected_at` | `call-orchestrator` through `ready`, then `agent` |
+| `calls` | `call_id` PK, alert_id, channel, **state**, `state_history` JSONB, outcome, `ring_at`, `ready_at`, `connected_at` | `core-api`, driven by `call-orchestrator` through `ready` and by `agent` after |
 | `turns` | call_id, idx, role, `text_redacted`, `stt_ms`, `llm_ms`, `tts_ms`, `net_ms` | `agent` |
 | `audit_log` | call_id, tool, `args_redacted`, result, ts | `core-api`, on every tool call |
 | `sandbox_sessions` | visitor_id, ip_hash, minutes_used, day | `core-api` |
@@ -329,7 +330,21 @@ Neon Postgres, one branch per environment. The schema applies idempotently ([PLA
 
 Two columns carry the redaction guarantee in their names — `turns.text_redacted` and `audit_log.args_redacted`. Nothing writes an unredacted variant because there is no unredacted column to write to.
 
-> **Open:** whether the orchestrator writes `calls` directly or through a `core-api` endpoint is not settled. Direct keeps the ring path free of an extra hop and matches "the orchestrator owns the row until connect"; going through `core-api` keeps a single writer. Either way, `core-api` owns the schema and migrations. Decide at [PLAN](PLAN.md) 3.6.
+### Writing `calls` (decided 2026-09-01)
+
+The orchestrator writes `calls` **through `core-api`**, not directly against Neon. `core-api` stays the single writer, so `state_history` appends and transition legality live in exactly one place rather than two implementations that can drift — and it is the same endpoint the agent drives later in the call.
+
+| Endpoint | Caller | Effect |
+|---|---|---|
+| `POST /internal/calls` | orchestrator | Creates the row at `ringing` with the already-minted `call_id` |
+| `PATCH /internal/calls/{call_id}/state` | orchestrator, then agent | Applies one transition: validates it, appends `{from, to, trigger, latency_ms, at}` to `state_history`, stamps `ring_at` / `ready_at` / `connected_at` |
+
+Both are internal — service-token auth, never reachable from the browser.
+
+Two consequences to build against:
+
+- **The row is written before `PUBLISH ring`,** not in parallel with it. The row is the source of truth; ringing a visitor whose call row does not exist yet leaves `session.ready` arriving for nothing.
+- **That puts one internal hop inside `alert_to_ring_ms`.** It is budgeted, and [PLAN](PLAN.md) 5.5 measures whether it holds; if it does not, the fix is co-locating `core-api` with Neon, not moving the write back out.
 
 ---
 
@@ -466,7 +481,7 @@ Each has a task that closes it; none blocks the phase it sits in.
 | Question | Why it matters | Closes at |
 |---|---|---|
 | Is `session.cancel` a stream or pub/sub? [BRIEF §5](BRIEF.md) lists it under pub/sub; [`02_handshake.mermaid`](02_handshake.mermaid) shows `XADD` | A dropped cancel leaks a warm pipeline until the ring timeout. Recommendation: **stream** — it must reach the specific worker holding that pipeline, and durability is worth more here than fan-out | [PLAN](PLAN.md) 3.6 / 3.7 |
-| Does the orchestrator write `calls` directly or via `core-api`? | Single-writer discipline vs. an extra hop on the ring path | [PLAN](PLAN.md) 3.6 |
+| Do `fraud_alerts` writes follow `calls` through `core-api`? | After the `calls` decision, `fraud_alerts` is the last table two services write directly. Consistency vs. one more hop on a path that is not latency-critical | [PLAN](PLAN.md) 3.3 / 3.6 |
 | Judge trigger policy — do both triggers earn their latency? | Escalation is the largest single addition to turn latency | [PLAN](PLAN.md) 2.4 |
 | Holding line during the judge round-trip? | Only needed if 2.4 measures the round-trip above the perceptible threshold | [PLAN](PLAN.md) 2.4 |
 | Where the state machine object lives inside the Pipecat pipeline, and the exact structured-output schema | Determines whether the validator can see every proposal | [PLAN](PLAN.md) 2.7 |
