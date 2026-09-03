@@ -12,7 +12,7 @@ Running log of what is actually done, verified how, and what got in the way.
 |---|---|---|
 | 0 · Bootstrap | 6 tasks (5 P0, 1 P1) | **✅ Complete** — every done-when verified, including the Redis half of 0.3 (B1 resolved) |
 | 1 · Transport skeleton | 5 tasks | **✅ Complete** — all five done; Safari half of 1.2 deferred to 4.6 (B9). **Phase 2 entry gate met** |
-| 2 · First conversation | 7 tasks | **In progress** — 2.1–2.3 ✅ · 2.5 ✅ · 2.6 ✅ |
+| 2 · First conversation | 7 tasks | **In progress** — 2.1–2.3 ✅ · 2.5–2.7 ✅ · 2.4 blocked (B10) |
 | 3 · State machine + pipeline | 11 tasks | Not started |
 | 4 · Demo + observability | 7 tasks | Not started |
 | 5 · Hardening tests | 5 tasks | Not started |
@@ -199,7 +199,7 @@ preflight unchanged, `/dev` now 404s.
 | 2.4 | Calibrate the two-tier model stack | P1 | **Blocked by choice** — see B10 | — | — | — |
 | 2.5 | Full happy path in browser (deny + confirm) | P0 | ✅ | 2026-09-03 | Both paths driven as scripted spoken calls against the seeded alert. **Deny:** verify → lookup → `block_card_and_reissue` → `transactions.status='blocked'`, `cards.status='blocked'`, `reissued_at` stamped. **Confirm:** verify → lookup → `release_hold` → `transactions.status='released'`, card untouched. Audit rows for every call. Two correctness defects found on the way — see below | *(this commit)* |
 | 2.6 | PAN redaction (regex + Luhn) | P0 | ✅ | 2026-09-03 | 25 unit tests plus a live check against Neon: a Luhn-valid PAN posted to `/internal/turns` comes back `[REDACTED-PAN]`, written *or* spoken as words, and `turns.text_redacted` holds nothing matching it. "Last four are 4242, born in Porto" survives untouched | *(this commit)* |
-| 2.7 | Spec: state machine placement + structured-output schema | P0 | Not started | — | — | — |
+| 2.7 | Spec: state machine placement + structured-output schema | P0 | ✅ | 2026-09-03 | [docs/STATE_MACHINE.md](STATE_MACHINE.md) and `sentinel_contracts.pathway` — `ProposedTurn`, the transition table, the verified-only actions and the tool-to-state binding, all as data. 18 tests pin the table: every state reachable, every state can reach `close`, no `action_*` edge from `consent` or `verify_identity`, each irreversible tool in exactly one state. BRIEF §10 and ARCHITECTURE §14 rows closed | *(this commit)* |
 
 ### First real latency numbers
 

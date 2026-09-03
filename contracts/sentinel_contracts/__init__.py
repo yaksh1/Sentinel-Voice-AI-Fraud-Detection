@@ -19,9 +19,27 @@ from sentinel_contracts.events import (
     SessionReady,
     SessionReadyNotice,
 )
+from sentinel_contracts.pathway import (
+    LEGAL_TRANSITIONS,
+    MAX_VERIFY_ATTEMPTS,
+    REQUIRES_VERIFIED,
+    TOOLS_BY_STATE,
+    PathwayState,
+    ProposedTurn,
+    ToolCall,
+    TurnVerdict,
+)
 from sentinel_contracts.redact import PLACEHOLDER, luhn_ok, redact_pan
 
 __all__ = [
+    "LEGAL_TRANSITIONS",
+    "MAX_VERIFY_ATTEMPTS",
+    "REQUIRES_VERIFIED",
+    "TOOLS_BY_STATE",
+    "PathwayState",
+    "ProposedTurn",
+    "ToolCall",
+    "TurnVerdict",
     "PLACEHOLDER",
     "luhn_ok",
     "redact_pan",
