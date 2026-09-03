@@ -12,7 +12,7 @@ Running log of what is actually done, verified how, and what got in the way.
 |---|---|---|
 | 0 · Bootstrap | 6 tasks (5 P0, 1 P1) | **✅ Complete** — every done-when verified, including the Redis half of 0.3 (B1 resolved) |
 | 1 · Transport skeleton | 5 tasks | **✅ Complete** — all five done; Safari half of 1.2 deferred to 4.6 (B9). **Phase 2 entry gate met** |
-| 2 · First conversation | 7 tasks | **In progress** — 2.1–2.3 ✅ · 2.5–2.7 ✅ · 2.4 blocked (B10) |
+| 2 · First conversation | 7 tasks | **✅ Complete** — 2.1–2.3, 2.5–2.7 done; 2.4's judge half deferred (B10) |
 | 3 · State machine + pipeline | 11 tasks | Not started |
 | 4 · Demo + observability | 7 tasks | Not started |
 | 5 · Hardening tests | 5 tasks | Not started |
@@ -196,7 +196,7 @@ preflight unchanged, `/dev` now 404s.
 | 2.1 | Wire Deepgram Nova STT and Cartesia TTS into the pipeline | P0 | ✅ | 2026-09-02 17:00 · browser 2026-09-02 | Real speech through the real pipeline, no browser needed: Cartesia synthesised "Hello. My name is Alex Rivera.", a probe streamed the WAV in over WebRTC, Deepgram returned it as **two** correctly endpointed utterances (`stt: 'Hello.'`, `stt: 'My name is Alex Rivera.'`) and Cartesia spoke both back as audio the probe received. Text mode (1.4) re-checked, no regression. Confirmed by ear in the browser | `311b4a9` |
 | 2.2 | Persona system prompt + consent line | P0 | ✅ | 2026-09-02 17:55 | The consent line is the first thing spoken, before the model is asked for anything — confirmed in the TTS log on every run. A full turn now works: caller says "Yes, now is a good time", agent replies *"Great, thank you. To verify your account, could you please tell me the last four digits of the card…"* — persona holding, and asking for last four rather than a full number without being reminded. Typed input reaches the same conversation and gets the same persona | *(this commit)* |
 | 2.3 | Five Neon tools via `core-api`, each writing an audit row | P0 | ✅ | 2026-09-02 19:05 | All five exercised against the real Neon branch, 17 assertions green. Each returns the right data *and* the row in Neon agrees: transaction released then blocked, card blocked with `reissued_at` stamped, `verified` set. Exactly one `audit_log` row per successful call, and zero rows containing the challenge answer | *(this commit)* |
-| 2.4 | Calibrate the two-tier model stack | P1 | **Blocked by choice** — see B10 | — | — | — |
+| 2.4 | Calibrate the two-tier model stack | P1 | ◐ Cerebras half ✅ | 2026-09-03 | [docs/LLM_CHOICE.md](LLM_CHOICE.md): 24 measured turns, **p50 257 ms / p95 392 ms**, tool choice correct **23/24**. Escalation triggers and thresholds committed to `sentinel_contracts.pathway` as config. Judge round-trip and the holding-line decision remain open — they need the Anthropic call (B10) | *(this commit)* |
 | 2.5 | Full happy path in browser (deny + confirm) | P0 | ✅ | 2026-09-03 | Both paths driven as scripted spoken calls against the seeded alert. **Deny:** verify → lookup → `block_card_and_reissue` → `transactions.status='blocked'`, `cards.status='blocked'`, `reissued_at` stamped. **Confirm:** verify → lookup → `release_hold` → `transactions.status='released'`, card untouched. Audit rows for every call. Two correctness defects found on the way — see below | *(this commit)* |
 | 2.6 | PAN redaction (regex + Luhn) | P0 | ✅ | 2026-09-03 | 25 unit tests plus a live check against Neon: a Luhn-valid PAN posted to `/internal/turns` comes back `[REDACTED-PAN]`, written *or* spoken as words, and `turns.text_redacted` holds nothing matching it. "Last four are 4242, born in Porto" survives untouched | *(this commit)* |
 | 2.7 | Spec: state machine placement + structured-output schema | P0 | ✅ | 2026-09-03 | [docs/STATE_MACHINE.md](STATE_MACHINE.md) and `sentinel_contracts.pathway` — `ProposedTurn`, the transition table, the verified-only actions and the tool-to-state binding, all as data. 18 tests pin the table: every state reachable, every state can reach `close`, no `action_*` edge from `consent` or `verify_identity`, each irreversible tool in exactly one state. BRIEF §10 and ARCHITECTURE §14 rows closed | *(this commit)* |
@@ -468,6 +468,35 @@ thing to leave to a language model.
 Both reached a closing line without prompting. "Reaching `close`" as a *state*
 is not yet meaningful — there is no state machine to be in. That is 3.1.
 
+### What 2.4 measured, and one number that was a lie
+
+**Latency is not the problem.** 24 turns replayed at `gpt-oss-120b` with the
+real prompt and real tool schemas: **p50 257 ms, p95 392 ms**, against an
+ARCHITECTURE budget of ~400 ms p50. Even p95 lands inside the p50 allowance.
+
+That also corrects the record: the 0.94 s logged during 2.2 was a first-call
+measurement dominated by connection setup, not inference. The alarm raised
+there was unfounded, and the corrected figure is in [LLM_CHOICE.md](LLM_CHOICE.md).
+
+**Tool discipline is the problem, and it is narrow.** One failure in 24, at
+`just_verified`: the model talks about the transaction instead of calling
+`lookup_transaction` first. Roughly 1 in 6 at the single step where being wrong
+means reading invented financial details to a cardholder — which is exactly what
+2.5 caught live. That 1-in-6 is the entire justification for 3.1.
+
+**The number that was a lie.** An earlier run scored `caller_denied` **0/6**,
+which reads as "the model will not use the block tool" and would have sent 3.1
+chasing the wrong failure. It was the fixture: the conversation had been
+assembled without a verification step, and the model was correctly refusing to
+block a card for an unverified caller. With verification restored it scores 6/6.
+The lesson is the same one B7 taught with the stale uvicorn — a bad result needs
+its setup checked before its conclusion is believed.
+
+**Rate limits shaped the harness.** Cerebras' free tier 429s after about five
+requests in quick succession. The harness paces at 2.5 s and retries a 429 with
+backoff, and the retry wait is excluded from the latency sample — otherwise the
+throttle would have been recorded as model latency.
+
 ---
 
 ## Blockers
@@ -587,7 +616,9 @@ is not yet meaningful — there is no state machine to be in. That is 3.1.
   is what a p50/p95 over ~10 escalations would actually cost; or cut the judge
   from v1 entirely, which the PLAN's own cut line already contemplates (3.11 and
   2.4 are both P1).
-- **Not urgent:** 2.4 is P1 and nothing before 2.5 depends on it.
+- **Status 2026-09-03:** the Cerebras half of 2.4 is done and committed; only the judge
+  round-trip and the holding-line decision are still waiting on this. 3.11 is blocked the
+  same way and is the next thing that will want an answer.
 
 ---
 

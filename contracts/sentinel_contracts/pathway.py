@@ -75,6 +75,23 @@ TOOLS_BY_STATE: dict[PathwayState, frozenset[str]] = {
 #: Retry cap for identity verification (BRIEF §5). A third failure escalates.
 MAX_VERIFY_ATTEMPTS = 2
 
+#: Escalation policy (PLAN 2.4, docs/LLM_CHOICE.md). Config, not prose, so 3.11
+#: reads the same numbers the calibration was written against.
+#:
+#: A validator rejection escalates because re-prompting the model that just
+#: broke a rule is asking the same question twice. A proposed irreversible
+#: action escalates because those are the two outcomes that cannot be undone.
+ESCALATE_ON_REJECTION = True
+ESCALATE_ON_IRREVERSIBLE_ACTION = True
+
+#: At most one escalation per turn: a second rejection goes to
+#: `escalate_to_analyst` rather than to a third opinion.
+MAX_ESCALATIONS_PER_TURN = 1
+
+#: The judge fails **closed**. A timeout or a 429 must never be able to produce
+#: an `action_*` — the call escalates to a human instead.
+JUDGE_TIMEOUT_S = 4.0
+
 
 class ToolCall(BaseModel):
     """A tool the model wants run, before it is known to be allowed."""
