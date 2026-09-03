@@ -52,11 +52,15 @@ class LookupTransaction(BaseModel):
 
 @router.post("/lookup_transaction")
 async def lookup_transaction(req: LookupTransaction) -> dict[str, Any]:
-    """What was flagged: merchant, amount, city, time."""
+    """What was flagged: merchant, amount, city, time.
+
+    Returns `card_id` as well as `txn_id` because the agent needs both to act:
+    a confirmed charge releases the transaction, a denied one blocks the card.
+    """
     async with db.pool().acquire() as conn, conn.transaction():
         row = await conn.fetchrow(
             """
-            SELECT t.id AS txn_id, t.amount_cents, t.currency, t.merchant_name,
+            SELECT t.id AS txn_id, t.card_id, t.amount_cents, t.currency, t.merchant_name,
                    t.merchant_city, t.merchant_country, t.occurred_at, t.status
             FROM fraud_alerts a
             JOIN transactions t ON t.id = a.txn_id
@@ -68,6 +72,11 @@ async def lookup_transaction(req: LookupTransaction) -> dict[str, Any]:
             raise HTTPException(404, "no such alert")
 
         result = dict(row)
+        # Hand the model the amount already formatted. Asked to turn 94000 cents
+        # into dollars it said "ninety-four dollars and ninety cents", which is
+        # the wrong number said confidently to a customer about their own money.
+        # Unit conversion is not a thing to leave to a language model.
+        result["amount_display"] = f"{result['amount_cents'] / 100:,.2f} {result['currency']}"
         await _audit(
             conn, req.call_id, "lookup_transaction", {"alert_id": str(req.alert_id)}, result
         )

@@ -12,7 +12,7 @@ Running log of what is actually done, verified how, and what got in the way.
 |---|---|---|
 | 0 · Bootstrap | 6 tasks (5 P0, 1 P1) | **✅ Complete** — every done-when verified, including the Redis half of 0.3 (B1 resolved) |
 | 1 · Transport skeleton | 5 tasks | **✅ Complete** — all five done; Safari half of 1.2 deferred to 4.6 (B9). **Phase 2 entry gate met** |
-| 2 · First conversation | 7 tasks | **In progress** — 2.1–2.3 ✅ · 2.6 ✅ |
+| 2 · First conversation | 7 tasks | **In progress** — 2.1–2.3 ✅ · 2.5 ✅ · 2.6 ✅ |
 | 3 · State machine + pipeline | 11 tasks | Not started |
 | 4 · Demo + observability | 7 tasks | Not started |
 | 5 · Hardening tests | 5 tasks | Not started |
@@ -197,7 +197,7 @@ preflight unchanged, `/dev` now 404s.
 | 2.2 | Persona system prompt + consent line | P0 | ✅ | 2026-09-02 17:55 | The consent line is the first thing spoken, before the model is asked for anything — confirmed in the TTS log on every run. A full turn now works: caller says "Yes, now is a good time", agent replies *"Great, thank you. To verify your account, could you please tell me the last four digits of the card…"* — persona holding, and asking for last four rather than a full number without being reminded. Typed input reaches the same conversation and gets the same persona | *(this commit)* |
 | 2.3 | Five Neon tools via `core-api`, each writing an audit row | P0 | ✅ | 2026-09-02 19:05 | All five exercised against the real Neon branch, 17 assertions green. Each returns the right data *and* the row in Neon agrees: transaction released then blocked, card blocked with `reissued_at` stamped, `verified` set. Exactly one `audit_log` row per successful call, and zero rows containing the challenge answer | *(this commit)* |
 | 2.4 | Calibrate the two-tier model stack | P1 | **Blocked by choice** — see B10 | — | — | — |
-| 2.5 | Full happy path in browser (deny + confirm) | P0 | Not started | — | — | — |
+| 2.5 | Full happy path in browser (deny + confirm) | P0 | ✅ | 2026-09-03 | Both paths driven as scripted spoken calls against the seeded alert. **Deny:** verify → lookup → `block_card_and_reissue` → `transactions.status='blocked'`, `cards.status='blocked'`, `reissued_at` stamped. **Confirm:** verify → lookup → `release_hold` → `transactions.status='released'`, card untouched. Audit rows for every call. Two correctness defects found on the way — see below | *(this commit)* |
 | 2.6 | PAN redaction (regex + Luhn) | P0 | ✅ | 2026-09-03 | 25 unit tests plus a live check against Neon: a Luhn-valid PAN posted to `/internal/turns` comes back `[REDACTED-PAN]`, written *or* spoken as words, and `turns.text_redacted` holds nothing matching it. "Last four are 4242, born in Porto" survives untouched | *(this commit)* |
 | 2.7 | Spec: state machine placement + structured-output schema | P0 | Not started | — | — | — |
 
@@ -425,6 +425,48 @@ redactor cannot be skipped by writing somewhere else.
 has a foreign key to `calls` and no `calls` row exists until the orchestrator
 mints one in 3.6. The property is enforced at the boundary and proved there; the
 agent-side wiring lands with the call row.
+
+### 2.5 found the failure the PLAN predicted
+
+PLAN Phase 2's risk note reads: *"the LLM ignores tool discipline. Mitigation:
+2.7 is the answer; don't try to prompt your way out of it."* On the deny path,
+after verification passed, the agent said this **before calling any tool**:
+
+> It was a purchase of thirty-nine dollars at a merchant called Green Grove
+> Grocery on March twenty-second at two-four p.m. in Springfield.
+
+None of that exists. The real transaction is **$940 at Lisboa Eletrónica in
+Lisbon**. The agent invented a merchant, an amount, a city and a date, read them
+to the cardholder as fact, and only called `lookup_transaction` *after* they had
+denied a charge that had been described to them wrongly.
+
+The system prompt already says, in as many words, *"Do not invent transactions,
+amounts, merchants or account details."* The tool description already says to
+call it before presenting anything. Both were ignored. **That is the evidence
+2.7 exists to act on, and it is worth keeping precisely because the prompt was
+not weak — it was explicit, and explicit was not enough.** A validator that
+refuses to leave `verify_identity` until `lookup_transaction` has returned is a
+different kind of thing from an instruction, and only the first kind holds.
+
+The confirm path had a second, smaller defect: asked to render `amount_cents`
+94000, the agent said *"ninety-four dollars and ninety cents"*. Wrong number,
+stated confidently, about someone's own money. Fixed at the contract rather than
+in the prompt — `lookup_transaction` now returns `amount_display` ("940.00 USD")
+and the tool description says to read it back verbatim. Unit conversion is not a
+thing to leave to a language model.
+
+### What the two paths actually did
+
+| | Deny | Confirm |
+|---|---|---|
+| `verify_challenge` | passed, attempt 1 | passed, attempt 1 |
+| `lookup_transaction` | called (late — see above) | called before presenting |
+| action | `block_card_and_reissue` | `release_hold` |
+| `transactions.status` | `blocked` | `released` |
+| `cards.status` | `blocked`, `reissued_at` set | `active` |
+
+Both reached a closing line without prompting. "Reaching `close`" as a *state*
+is not yet meaningful — there is no state machine to be in. That is 3.1.
 
 ---
 

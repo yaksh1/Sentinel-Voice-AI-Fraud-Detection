@@ -38,6 +38,7 @@ from pipecat.turns.user_mute import MuteUntilFirstBotCompleteUserMuteStrategy
 from pipecat.workers.runner import WorkerRunner
 
 from sentinel_agent.timing import FrameTimingProcessor
+from sentinel_agent.tools import TOOLS
 from sentinel_contracts.redact import redact_pan
 
 # The RTVI message type the browser sends for typed input (PLAN 1.4).
@@ -169,7 +170,7 @@ async def run_agent(connection: SmallWebRTCConnection) -> None:
         settings=CartesiaTTSService.Settings(voice=VOICE_ID),
     )
 
-    context = LLMContext()
+    context = LLMContext(tools=TOOLS)
     # Two settings, for two different failures.
     #
     # VAD: without it the aggregator ends a user turn on every final transcript,
