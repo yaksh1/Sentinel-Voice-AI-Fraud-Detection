@@ -12,7 +12,7 @@ Running log of what is actually done, verified how, and what got in the way.
 |---|---|---|
 | 0 · Bootstrap | 6 tasks (5 P0, 1 P1) | **✅ Complete** — every done-when verified, including the Redis half of 0.3 (B1 resolved) |
 | 1 · Transport skeleton | 5 tasks | **✅ Complete** — all five done; Safari half of 1.2 deferred to 4.6 (B9). **Phase 2 entry gate met** |
-| 2 · First conversation | 7 tasks | **✅ Complete** — 2.1–2.3, 2.5–2.7 done; 2.4's judge half deferred (B10) |
+| 2 · First conversation | 7 tasks | **✅ Complete** — all seven, including 2.4's judge half (B10 resolved) |
 | 3 · State machine + pipeline | 11 tasks | Not started |
 | 4 · Demo + observability | 7 tasks | Not started |
 | 5 · Hardening tests | 5 tasks | Not started |
@@ -196,7 +196,7 @@ preflight unchanged, `/dev` now 404s.
 | 2.1 | Wire Deepgram Nova STT and Cartesia TTS into the pipeline | P0 | ✅ | 2026-09-02 17:00 · browser 2026-09-02 | Real speech through the real pipeline, no browser needed: Cartesia synthesised "Hello. My name is Alex Rivera.", a probe streamed the WAV in over WebRTC, Deepgram returned it as **two** correctly endpointed utterances (`stt: 'Hello.'`, `stt: 'My name is Alex Rivera.'`) and Cartesia spoke both back as audio the probe received. Text mode (1.4) re-checked, no regression. Confirmed by ear in the browser | `311b4a9` |
 | 2.2 | Persona system prompt + consent line | P0 | ✅ | 2026-09-02 17:55 | The consent line is the first thing spoken, before the model is asked for anything — confirmed in the TTS log on every run. A full turn now works: caller says "Yes, now is a good time", agent replies *"Great, thank you. To verify your account, could you please tell me the last four digits of the card…"* — persona holding, and asking for last four rather than a full number without being reminded. Typed input reaches the same conversation and gets the same persona | *(this commit)* |
 | 2.3 | Five Neon tools via `core-api`, each writing an audit row | P0 | ✅ | 2026-09-02 19:05 | All five exercised against the real Neon branch, 17 assertions green. Each returns the right data *and* the row in Neon agrees: transaction released then blocked, card blocked with `reissued_at` stamped, `verified` set. Exactly one `audit_log` row per successful call, and zero rows containing the challenge answer | *(this commit)* |
-| 2.4 | Calibrate the two-tier model stack | P1 | ◐ Cerebras half ✅ | 2026-09-03 | [docs/LLM_CHOICE.md](LLM_CHOICE.md): 24 measured turns, **p50 257 ms / p95 392 ms**, tool choice correct **23/24**. Escalation triggers and thresholds committed to `sentinel_contracts.pathway` as config. Judge round-trip and the holding-line decision remain open — they need the Anthropic call (B10) | *(this commit)* |
+| 2.4 | Calibrate the two-tier model stack | P1 | ✅ | 2026-09-03 | [docs/LLM_CHOICE.md](LLM_CHOICE.md): 24 measured turns, **p50 257 ms / p95 392 ms**, tool choice correct **23/24**. Escalation triggers and thresholds committed to `sentinel_contracts.pathway` as config. Judge measured after authorisation: **16/16 legal verdicts**, p50 1811 ms, p95 4869 ms. Holding line decided (required) and appended to BRIEF §10; `JUDGE_TIMEOUT_S` corrected 4.0 → 6.0 | *(this commit)* |
 | 2.5 | Full happy path in browser (deny + confirm) | P0 | ✅ | 2026-09-03 | Both paths driven as scripted spoken calls against the seeded alert. **Deny:** verify → lookup → `block_card_and_reissue` → `transactions.status='blocked'`, `cards.status='blocked'`, `reissued_at` stamped. **Confirm:** verify → lookup → `release_hold` → `transactions.status='released'`, card untouched. Audit rows for every call. Two correctness defects found on the way — see below | *(this commit)* |
 | 2.6 | PAN redaction (regex + Luhn) | P0 | ✅ | 2026-09-03 | 25 unit tests plus a live check against Neon: a Luhn-valid PAN posted to `/internal/turns` comes back `[REDACTED-PAN]`, written *or* spoken as words, and `turns.text_redacted` holds nothing matching it. "Last four are 4242, born in Porto" survives untouched | *(this commit)* |
 | 2.7 | Spec: state machine placement + structured-output schema | P0 | ✅ | 2026-09-03 | [docs/STATE_MACHINE.md](STATE_MACHINE.md) and `sentinel_contracts.pathway` — `ProposedTurn`, the transition table, the verified-only actions and the tool-to-state binding, all as data. 18 tests pin the table: every state reachable, every state can reach `close`, no `action_*` edge from `consent` or `verify_identity`, each irreversible tool in exactly one state. BRIEF §10 and ARCHITECTURE §14 rows closed | *(this commit)* |
@@ -497,6 +497,34 @@ requests in quick succession. The harness paces at 2.5 s and retries a 429 with
 backoff, and the retry wait is excluded from the latency sample — otherwise the
 throttle would have been recorded as model latency.
 
+### The judge, measured
+
+Two guesses committed before 2.4 turned out wrong, in opposite directions.
+
+**`JUDGE_TIMEOUT_S = 4.0` was too tight.** Measured p95 for a Sonnet 5
+escalation is 4.87 s. A 4 s ceiling fails closed on roughly one escalation in
+twenty for no reason but its own impatience — and failing closed means handing a
+live caller to a human. Raised to 6.0.
+
+**The holding line was listed as "open, probably unnecessary".** It is required.
+A normal turn is ~990 ms voice-to-voice; an escalated one is ~2.8 s, which is
+2.3× the budget and reads to a caller as a dropped line. Worse, a caller who
+says "hello?" into that silence hands VAD a new turn on top of an escalation
+already in flight. `JUDGE_HOLDING_LINE` is a constant for the same reason the
+consent line is: the model that just produced a rejected turn is not the thing
+to ask for a stalling phrase.
+
+**What the judge is actually good at.** Given 2.5's fabricated
+`present_transaction` turn, it returned `verify_identity` + `verify_challenge` +
+*"Thank you, let me verify that information now."* — it stayed where the pathway
+really was, reached for the tool that had been skipped, and invented nothing.
+16 of 16 verdicts were legal transitions.
+
+**What is still guessed:** how *often* escalation fires in a real call. That
+needs 3.1 to exist to do the rejecting. If it turns out common, the 1-in-6
+tool-discipline failure is a latency problem as well as a correctness one, and
+the fix is a better fast-model prompt rather than a faster judge.
+
 ---
 
 ## Blockers
@@ -601,7 +629,7 @@ throttle would have been recorded as model latency.
   turns out to need transport changes (autoplay, codec negotiation), it surfaces late.
   Accepted knowingly — the alternative spends Saturday on deployment plumbing.
 
-### B10 · 2.4 needs the Anthropic key, which is off limits · **OPEN**
+### B10 · 2.4 needs the Anthropic key, which is off limits · **RESOLVED**
 
 - **Raised:** 2026-09-02, by instruction at the start of Phase 2.
 - **Constraint:** do not call the Anthropic API without discussing it first;
@@ -616,9 +644,12 @@ throttle would have been recorded as model latency.
   is what a p50/p95 over ~10 escalations would actually cost; or cut the judge
   from v1 entirely, which the PLAN's own cut line already contemplates (3.11 and
   2.4 are both P1).
-- **Status 2026-09-03:** the Cerebras half of 2.4 is done and committed; only the judge
-  round-trip and the holding-line decision are still waiting on this. 3.11 is blocked the
-  same way and is the next thing that will want an answer.
+- **Resolved 2026-09-03:** authorised ("okay use sonnet") for the judge work at the quoted
+  scale of ~10–20 calls; 16 were spent. 3.11 is unblocked on the same authorisation. The
+  measurement is in [LLM_CHOICE.md](LLM_CHOICE.md) and changed two committed values, which is
+  the argument for having asked rather than guessed: `JUDGE_TIMEOUT_S` was set to 4.0 before
+  measuring and the real p95 is 4.87 s, so the guess would have failed closed on roughly one
+  escalation in twenty; and the holding line turned out to be required rather than optional.
 
 ---
 

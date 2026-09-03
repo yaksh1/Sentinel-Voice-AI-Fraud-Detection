@@ -90,7 +90,16 @@ MAX_ESCALATIONS_PER_TURN = 1
 
 #: The judge fails **closed**. A timeout or a 429 must never be able to produce
 #: an `action_*` — the call escalates to a human instead.
-JUDGE_TIMEOUT_S = 4.0
+#:
+#: 6.0, not the 4.0 first guessed: measured p95 for a Sonnet 5 escalation is
+#: 4.87 s (docs/LLM_CHOICE.md). A 4 s ceiling would have failed closed on
+#: roughly one escalation in twenty for no reason but its own impatience, and
+#: failing closed means handing a live caller to a human.
+JUDGE_TIMEOUT_S = 6.0
+
+#: An escalation costs ~1.8 s p50 on top of a 257 ms turn, which is silence a
+#: caller reads as a dropped line. Say something before waiting.
+JUDGE_HOLDING_LINE = "One moment while I confirm that."
 
 
 class ToolCall(BaseModel):
