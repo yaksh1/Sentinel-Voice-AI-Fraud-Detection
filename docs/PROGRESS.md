@@ -615,6 +615,58 @@ the specific phrasings (transferring, holding, staying on the line) and says wha
 escalation actually means: an analyst reviews the case *after* the call, so the
 agent closes the call itself.
 
+### Demo reset and agent hang-up (2026-09-03)
+
+Two conveniences asked for during dogfooding, neither in PLAN.
+
+**Reset on connect — done and verified.** `POST /internal/demo/reset` puts the
+seeded transaction back to `held` and the card back to `active`, and the agent
+calls it when a caller connects. Verified by deliberately blocking both rows and
+watching the next connect repair them.
+
+Reset on *connect*, not on hang-up, though the request was for hang-up: a reset
+at the end of a call destroys the result before anyone can look at it, and
+"was the transaction actually blocked?" is the whole point of the demo. Connect
+gives the same guarantee — every call starts from the same place — and leaves
+the evidence. One line to flip if that reads wrong.
+
+`audit_log` is deliberately not reset. It is a log, PLAN 5.1 reads it, and a
+reset that quietly erases what the agent did defeats the point of having one.
+
+**Agent hang-up — built, not verified.** `HangUp` is a processor that pushes
+`EndWorkerFrame` once the agent stops speaking, which drains the pipeline instead
+of cutting the goodbye off mid-word. `end_call` is advertised to the model and
+the prompt tells it to call it.
+
+The model would not use it. Offered the tool and told to close the call, it
+instead said *"you may hang up, or call the number on the back of your card"* and
+left the line open — the same shape as every other instruction this project has
+tried to enforce by prompt. So the hang-up is armed structurally instead: a
+successful `release_hold`, `block_card_and_reissue` or `escalate_to_analyst` arms
+it, because those are the three ways a call ends. `end_call` stays for a caller
+who says goodbye before any of them.
+
+**It has not been seen to fire end to end**, because of B13.
+
+### B13 · The LLM stalls after a tool result, and it is not the rate limit · **OPEN**
+
+- **Seen three times**, 21 s, 26 s, and once fatally, always as: a request is
+  logged, no first token ever arrives, and the call is eventually cancelled by
+  something else.
+- **Not a Cerebras rate limit.** No 429 is ever logged, and calls at the same
+  request rate in the same session return in 0.15–0.4 s. The earlier note in this
+  file guessing rate limiting for the first 21 s stall should be read as
+  superseded, not confirmed.
+- **Not the model being slow.** The 2.4 harness put the same prompt, the same
+  tool schemas and the same tool-result contexts at `gpt-oss-120b` 24 times for a
+  p50 of 257 ms.
+- **The difference between the harness and the pipeline is streaming.** The
+  calibration harness used a non-streaming request; the pipeline streams. That is
+  the next thing to test — the same tool-result context, streamed, timed — and it
+  is a ten-minute experiment, not a guess.
+- **Impact:** it is now the dominant latency problem, well above anything the
+  turn-detection work addressed, and it blocks verifying the hang-up.
+
 ---
 
 ## Blockers

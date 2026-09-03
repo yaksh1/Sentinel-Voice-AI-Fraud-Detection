@@ -33,6 +33,36 @@ class Turn(BaseModel):
     net_ms: int | None = None
 
 
+# db/seed.sql — the demo's own rows.
+DEMO_TXN = "00000000-0000-0000-0000-000000000003"
+DEMO_CARD = "00000000-0000-0000-0000-000000000002"
+
+
+@router.post("/demo/reset")
+async def reset_demo() -> dict[str, Any]:
+    """Put the seeded transaction and card back the way a call finds them.
+
+    A demo is only repeatable if it starts from the same place: after a deny run
+    the transaction is blocked and the card is dead, so the next caller who
+    confirms the charge gets "transaction is blocked, not held" — a correct
+    answer to the wrong question.
+
+    `audit_log` is deliberately left alone. It is a log, PLAN 5.1 reads it, and a
+    reset that quietly erases the record of what the agent did would defeat the
+    point of having one.
+    """
+    async with db.pool().acquire() as conn, conn.transaction():
+        await conn.execute(
+            "UPDATE transactions SET status = 'held', updated_at = now() WHERE id = $1",
+            UUID(DEMO_TXN),
+        )
+        await conn.execute(
+            "UPDATE cards SET status = 'active', reissued_at = NULL WHERE id = $1",
+            UUID(DEMO_CARD),
+        )
+    return {"reset": True, "transaction": "held", "card": "active"}
+
+
 @router.post("/turns")
 async def record_turn(turn: Turn) -> dict[str, Any]:
     """Store one turn of the conversation, redacted."""

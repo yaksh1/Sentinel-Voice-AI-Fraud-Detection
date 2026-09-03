@@ -70,6 +70,19 @@ async def _post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "error": "the banking system did not respond"}
 
 
+# Set by the pipeline for the life of one call. The handler cannot end the call
+# itself: at the moment `end_call` runs, the goodbye has not been generated yet —
+# the tool result is what prompts the model to say it. So the tool only arms, and
+# the pipeline hangs up once the agent has actually stopped speaking.
+_hangup: Any = None
+
+
+def set_hangup(hangup: Any) -> None:
+    """Give the tools the current call's hang-up latch."""
+    global _hangup
+    _hangup = hangup
+
+
 async def _verify_challenge(params: FunctionCallParams) -> None:
     result = await _post(
         "/tools/verify_challenge",
@@ -89,16 +102,52 @@ async def _lookup_transaction(params: FunctionCallParams) -> None:
     await params.result_callback(result)
 
 
+def _arm_if_final(result: dict[str, Any]) -> None:
+    """Hang up after a tool that ends the call, without asking the model to.
+
+    `end_call` exists and the model is told to use it, and in testing it did not:
+    it said "you may hang up" and left the line open. Every instruction this
+    project has tried to enforce by prompt has eventually been ignored, so the
+    terminal tools arm the hang-up themselves. Releasing, blocking and escalating
+    are the three ways a call ends; after any of them the agent says its closing
+    line and the line drops when it stops speaking.
+    """
+    if result.get("ok") and _hangup is not None:
+        _hangup.arm()
+
+
 async def _release_hold(params: FunctionCallParams) -> None:
     result = await _post("/tools/release_hold", {"txn_id": params.arguments["txn_id"]})
     logger.info("tool release_hold -> {}", result)
+    _arm_if_final(result)
     await params.result_callback(result)
 
 
 async def _block_card_and_reissue(params: FunctionCallParams) -> None:
     result = await _post("/tools/block_card_and_reissue", {"card_id": params.arguments["card_id"]})
     logger.info("tool block_card_and_reissue -> {}", result)
+    _arm_if_final(result)
     await params.result_callback(result)
+
+
+async def _end_call(params: FunctionCallParams) -> None:
+    reason = str(params.arguments.get("reason", "conversation complete"))
+    logger.info("tool end_call -> arming hang-up ({})", reason)
+    if _hangup is not None:
+        _hangup.arm()
+    await params.result_callback(
+        {
+            "ok": True,
+            "ending": True,
+            "say": "Say your closing line now. Do not ask another question.",
+        }
+    )
+
+
+async def reset_demo() -> None:
+    """Put the seeded rows back so the next call starts from the same place."""
+    result = await _post("/internal/demo/reset", {})
+    logger.info("demo reset -> {}", result)
 
 
 async def _escalate_to_analyst(params: FunctionCallParams) -> None:
@@ -110,6 +159,7 @@ async def _escalate_to_analyst(params: FunctionCallParams) -> None:
         },
     )
     logger.info("tool escalate_to_analyst -> {}", result)
+    _arm_if_final(result)
     await params.result_callback(result)
 
 
@@ -160,6 +210,18 @@ TOOLS = [
         properties={"card_id": {"type": "string", "description": "From lookup_transaction."}},
         required=["card_id"],
         handler=_block_card_and_reissue,
+    ),
+    FunctionSchema(
+        name="end_call",
+        description=(
+            "Hang up. Call this once the matter is settled and you have nothing "
+            "further to do — after releasing or blocking, after escalating, or if "
+            "the caller says goodbye or asks you to stop. Say your closing line in "
+            "the same turn; the line stays open until you have finished speaking."
+        ),
+        properties={"reason": {"type": "string", "description": "Why the call is ending."}},
+        required=["reason"],
+        handler=_end_call,
     ),
     FunctionSchema(
         name="escalate_to_analyst",

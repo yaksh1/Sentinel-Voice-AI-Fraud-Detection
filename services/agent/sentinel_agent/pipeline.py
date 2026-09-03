@@ -20,7 +20,13 @@ from loguru import logger
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import Frame, TranscriptionFrame, TTSSpeakFrame
+from pipecat.frames.frames import (
+    BotStoppedSpeakingFrame,
+    EndWorkerFrame,
+    Frame,
+    TranscriptionFrame,
+    TTSSpeakFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -43,7 +49,7 @@ from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
 
 from sentinel_agent.timing import FrameTimingProcessor
-from sentinel_agent.tools import TOOLS
+from sentinel_agent.tools import TOOLS, reset_demo, set_hangup
 from sentinel_contracts.redact import redact_pan
 
 # The RTVI message type the browser sends for typed input (PLAN 1.4).
@@ -150,6 +156,35 @@ class TranscriptLog(FrameProcessor):
             logger.info("stt: {!r}", redact_pan(frame.text))
 
 
+class HangUp(FrameProcessor):
+    """End the call once the agent has finished saying goodbye.
+
+    `end_call` cannot hang up on its own. When the tool runs, the closing line
+    does not exist yet — the tool result is what prompts the model to say it. So
+    the tool arms this, and this waits for the agent to actually stop speaking
+    before pushing `EndWorkerFrame`, which drains the pipeline rather than
+    cutting the goodbye off mid-word.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._armed = False
+
+    def arm(self) -> None:
+        """Hang up after the agent's next completed utterance."""
+        self._armed = True
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Forward every frame; end the call once the agent stops speaking."""
+        await super().process_frame(frame, direction)
+        await self.push_frame(frame, direction)
+
+        if self._armed and isinstance(frame, BotStoppedSpeakingFrame):
+            self._armed = False
+            logger.info("call: agent hanging up")
+            await self.push_frame(EndWorkerFrame(reason="agent ended the call"))
+
+
 async def run_agent(connection: SmallWebRTCConnection) -> None:
     """Run one pipeline for one peer connection, until the client leaves.
 
@@ -192,6 +227,9 @@ async def run_agent(connection: SmallWebRTCConnection) -> None:
         api_key=os.environ["CARTESIA_API_KEY"],
         settings=CartesiaTTSService.Settings(voice=VOICE_ID),
     )
+
+    hangup = HangUp()
+    set_hangup(hangup)
 
     context = LLMContext(tools=TOOLS)
     # Two settings, for two different failures.
@@ -260,6 +298,7 @@ async def run_agent(connection: SmallWebRTCConnection) -> None:
             tts,
             transport.output(),
             assistant_aggregator,
+            hangup,
         ]
     )
     worker = PipelineWorker(pipeline, params=PipelineParams(enable_metrics=True))
@@ -272,6 +311,10 @@ async def run_agent(connection: SmallWebRTCConnection) -> None:
     @transport.event_handler("on_client_connected")
     async def on_client_connected(_transport, _client):
         logger.info("call: connected (call_id={} pc_id={})", call_id, connection.pc_id)
+        # Every call starts from the same place. Reset on connect rather than on
+        # hang-up so the result of the last call survives for inspection —
+        # otherwise the rows are gone before anyone can look at what happened.
+        await reset_demo()
         await worker.queue_frames([TTSSpeakFrame(CONSENT_LINE)])
 
     @transport.event_handler("on_client_disconnected")
