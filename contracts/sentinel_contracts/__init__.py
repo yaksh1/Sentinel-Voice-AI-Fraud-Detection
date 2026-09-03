@@ -19,8 +19,12 @@ from sentinel_contracts.events import (
     SessionReady,
     SessionReadyNotice,
 )
+from sentinel_contracts.redact import PLACEHOLDER, luhn_ok, redact_pan
 
 __all__ = [
+    "PLACEHOLDER",
+    "luhn_ok",
+    "redact_pan",
     "CHANNEL_RING",
     "CHANNEL_SANDBOX_BUSY",
     "CHANNEL_SESSION_READY",

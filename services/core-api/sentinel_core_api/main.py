@@ -3,8 +3,9 @@
     uv run uvicorn sentinel_core_api.main:app --port <port>
 
 /health is the liveness probe and /metrics is Prometheus text (PLAN 0.6).
-/tools/* are the five tools the agent calls (PLAN 2.3). Checkout, the call-row
-endpoints and SSE arrive in Phase 3 — see services/core-api/README.md.
+/tools/* are the five tools the agent calls (PLAN 2.3) and /internal/turns is
+the redacted transcript sink (PLAN 2.6). Checkout, the call-row endpoints and
+SSE arrive in Phase 3 — see services/core-api/README.md.
 """
 
 from contextlib import asynccontextmanager
@@ -14,6 +15,7 @@ from fastapi import FastAPI, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from sentinel_core_api import db
+from sentinel_core_api.internal import router as internal_router
 from sentinel_core_api.tools import router as tools_router
 
 # DATABASE_URL lives in the repo-root .env (PLAN 0.2); uvicorn does not read it.
@@ -32,6 +34,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=SERVICE, lifespan=lifespan)
 app.include_router(tools_router)
+app.include_router(internal_router)
 
 
 @app.get("/health")

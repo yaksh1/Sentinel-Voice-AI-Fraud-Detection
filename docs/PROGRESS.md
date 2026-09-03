@@ -12,7 +12,7 @@ Running log of what is actually done, verified how, and what got in the way.
 |---|---|---|
 | 0 · Bootstrap | 6 tasks (5 P0, 1 P1) | **✅ Complete** — every done-when verified, including the Redis half of 0.3 (B1 resolved) |
 | 1 · Transport skeleton | 5 tasks | **✅ Complete** — all five done; Safari half of 1.2 deferred to 4.6 (B9). **Phase 2 entry gate met** |
-| 2 · First conversation | 7 tasks | **In progress** — 2.1 ✅ · 2.2 ✅ · 2.3 ✅ |
+| 2 · First conversation | 7 tasks | **In progress** — 2.1–2.3 ✅ · 2.6 ✅ |
 | 3 · State machine + pipeline | 11 tasks | Not started |
 | 4 · Demo + observability | 7 tasks | Not started |
 | 5 · Hardening tests | 5 tasks | Not started |
@@ -198,7 +198,7 @@ preflight unchanged, `/dev` now 404s.
 | 2.3 | Five Neon tools via `core-api`, each writing an audit row | P0 | ✅ | 2026-09-02 19:05 | All five exercised against the real Neon branch, 17 assertions green. Each returns the right data *and* the row in Neon agrees: transaction released then blocked, card blocked with `reissued_at` stamped, `verified` set. Exactly one `audit_log` row per successful call, and zero rows containing the challenge answer | *(this commit)* |
 | 2.4 | Calibrate the two-tier model stack | P1 | **Blocked by choice** — see B10 | — | — | — |
 | 2.5 | Full happy path in browser (deny + confirm) | P0 | Not started | — | — | — |
-| 2.6 | PAN redaction (regex + Luhn) | P0 | Not started | — | — | — |
+| 2.6 | PAN redaction (regex + Luhn) | P0 | ✅ | 2026-09-03 | 25 unit tests plus a live check against Neon: a Luhn-valid PAN posted to `/internal/turns` comes back `[REDACTED-PAN]`, written *or* spoken as words, and `turns.text_redacted` holds nothing matching it. "Last four are 4242, born in Porto" survives untouched | *(this commit)* |
 | 2.7 | Spec: state machine placement + structured-output schema | P0 | Not started | — | — | — |
 
 ### First real latency numbers
@@ -390,6 +390,41 @@ and 2.5 run before that endpoint exists. Applied twice, still one row each.
   frame's file*. Read from stdin there is no file, and the frame walk asserts.
 - **Resolution:** pass the path — `load_dotenv(".env")` — in scratch scripts.
   Service code calls it from a real module and is unaffected.
+
+### What 2.6 found
+
+**Two false positives that a naive regex+Luhn ships with.**
+
+- *All-zero runs pass Luhn.* The checksum of nothing is zero, so
+  `0000000000000000` is a valid Luhn string. This repo's seed data is full of
+  zero-heavy UUIDs, so without a guard every identifier in the system reads as a
+  card number. `_is_pan` requires more than one distinct digit.
+- *UUIDs get eaten from the middle.* Treating `-` as a separator means
+  `00000000-0000-0000-0000-000000000003` contains a card-length digit run. The
+  boundaries now exclude `-` as well as digits, which still matches a genuinely
+  dashed card number because its own boundaries are whitespace.
+
+Both are in the test suite as regressions.
+
+**Spoken digits needed their own pass.** Deepgram runs with `numerals=False`, so
+a caller reading a card number aloud can come back as *"four one one one…"*,
+which no digit regex matches. `SPOKEN_DIGITS` maps the word forms and a second
+pass Luhn-checks those runs too. Anything stranger — "four, uh, one one" —
+still gets through, and the real defence remains that the agent never asks for a
+full number.
+
+**The redactor lives in `contracts`, not in a service.** Both `agent` (log
+lines) and `core-api` (persistence) need it, and a security control with two
+implementations has none.
+
+**`/internal/turns` is the only write path**, and it redacts on the way in. The
+schema gives it a `text_redacted` column and no unredacted counterpart, so the
+redactor cannot be skipped by writing somewhere else.
+
+**Still open:** the agent does not yet call `/internal/turns`, because `turns`
+has a foreign key to `calls` and no `calls` row exists until the orchestrator
+mints one in 3.6. The property is enforced at the boundary and proved there; the
+agent-side wiring lands with the call row.
 
 ---
 

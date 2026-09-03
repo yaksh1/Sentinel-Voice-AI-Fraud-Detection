@@ -38,6 +38,7 @@ from pipecat.turns.user_mute import MuteUntilFirstBotCompleteUserMuteStrategy
 from pipecat.workers.runner import WorkerRunner
 
 from sentinel_agent.timing import FrameTimingProcessor
+from sentinel_contracts.redact import redact_pan
 
 # The RTVI message type the browser sends for typed input (PLAN 1.4).
 TEXT_INPUT = "text-input"
@@ -108,7 +109,7 @@ class TypedInput(FrameProcessor):
             text = (frame.data or {}).get("text", "")
             if not text:
                 return
-            logger.info("typed: {!r}", text)
+            logger.info("typed: {!r}", redact_pan(text))
             await self.push_frame(
                 TranscriptionFrame(
                     text=text,
@@ -119,7 +120,13 @@ class TypedInput(FrameProcessor):
 
 
 class TranscriptLog(FrameProcessor):
-    """Log what the caller was heard to say. 2.6 redacts this before it persists."""
+    """Log what the caller was heard to say, with card numbers removed (2.6).
+
+    Redaction happens here rather than at the sink because this is the first
+    place caller speech becomes a log line. `frame.text` itself is left alone —
+    the model needs what was actually said to hold a conversation — but nothing
+    that leaves the process carries it unredacted.
+    """
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Forward every frame; additionally log final transcripts."""
@@ -127,7 +134,7 @@ class TranscriptLog(FrameProcessor):
         await self.push_frame(frame, direction)
 
         if isinstance(frame, TranscriptionFrame):
-            logger.info("stt: {!r}", frame.text)
+            logger.info("stt: {!r}", redact_pan(frame.text))
 
 
 async def run_agent(connection: SmallWebRTCConnection) -> None:
