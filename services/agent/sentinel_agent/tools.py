@@ -29,6 +29,28 @@ SEED_CUSTOMER_ID = "00000000-0000-0000-0000-000000000001"
 
 _TIMEOUT = httpx.Timeout(10.0)
 
+# One client for the process, not one per call. Building an AsyncClient inside
+# `_post` made every tool pay a fresh TCP and TLS handshake to core-api; the
+# measured round trip for verify_challenge was 1.24 s for what is one indexed
+# row. Keeping the pool alive is most of that back.
+_client: httpx.AsyncClient | None = None
+
+
+def client() -> httpx.AsyncClient:
+    """The shared client, created on first use."""
+    global _client
+    if _client is None:
+        _client = httpx.AsyncClient(base_url=CORE_API_URL, timeout=_TIMEOUT)
+    return _client
+
+
+async def close_client() -> None:
+    """Release the connection pool. Called from the app lifespan."""
+    global _client
+    if _client is not None:
+        await _client.aclose()
+        _client = None
+
 
 async def _post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Call core-api and return either its JSON or a shape the model can act on.
@@ -38,8 +60,7 @@ async def _post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     so out loud rather than inventing an outcome.
     """
     try:
-        async with httpx.AsyncClient(base_url=CORE_API_URL, timeout=_TIMEOUT) as client:
-            response = await client.post(path, json=payload)
+        response = await client().post(path, json=payload)
         if response.status_code >= 400:
             logger.warning("tool {} failed: {} {}", path, response.status_code, response.text)
             return {"ok": False, "error": response.json().get("detail", response.text)}

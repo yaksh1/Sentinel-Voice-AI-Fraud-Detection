@@ -525,6 +525,49 @@ needs 3.1 to exist to do the rejecting. If it turns out common, the 1-in-6
 tool-discipline failure is a latency problem as well as a correctness one, and
 the fix is a better fast-model prompt rather than a faster judge.
 
+### Latency pass: 4.5 s → 1.4 s per turn (2026-09-03)
+
+Reported from the browser as "too slow". Measured from the agent log rather than
+guessed, and the models turned out to be the innocent party: Cerebras 190 ms,
+Cartesia 150 ms. The 4.5 s between the caller finishing and the agent speaking
+was 3.0 s of turn detection and 1.24 s of HTTP.
+
+| | Before | After |
+|---|---|---|
+| Last transcript → turn ends | ~3000 ms | **184 ms** |
+| Turn end → tool returned | 1240 ms | **535 ms** |
+| Last transcript → agent speaks | **4.5 s** | **1.37 s** |
+| Muted during consent line | 11.0 s | 9.9 s |
+
+**Turn detection was never missing — it was misconfigured.** Pipecat already
+runs `LocalSmartTurnAnalyzerV3` as its default stop strategy, an ONNX model that
+decides semantically whether a turn ended. Its `SmartTurnParams.stop_secs`
+defaults to **3**, and that 3 was two thirds of the whole turn. Now 1.2.
+
+**0.8 s was tried first and was worse.** At 0.8 the turn ended on every Deepgram
+fragment — `'Yes.'` / `'Speaking.'` / `'My card ends four two four two.'` /
+`'I was born in Porto.'` — firing four LLM calls in four seconds, after which one
+call took **21 s** with no error logged. Cerebras' free tier 429s at about that
+rate and the OpenAI-compatible SDK retries silently, so a swallowed rate limit is
+the likely cause, but **no 429 was logged and this is unproven**. Deepgram's
+`endpointing` went to 800 ms so one answer is one final, and `stop_secs` to 1.2.
+The lesson generalises: faster turn detection is worth nothing if it outruns the
+model behind it.
+
+**The tool round trip was self-inflicted.** `_post` built a new
+`httpx.AsyncClient` per call, so every tool paid a fresh TCP and TLS handshake to
+core-api. One client for the process, closed in the lifespan.
+
+**Still the worst wait: 9.9 s muted on connect.** The consent line is 32 words
+and the caller cannot interrupt it (the 2.2 compliance fix). Cutting it from 41
+words bought 1.1 s. Going much shorter starts dropping one of the four things
+the disclosure has to say; the other lever is Cartesia's speech rate, untried.
+
+**Not adopted: LiveKit Agents.** Researched in parallel. Its turn-detection model
+is the same idea as the one Pipecat already ships, and migrating would mean
+rewriting the transport, the browser client and every processor. The two costs
+that actually hurt needed neither.
+
 ---
 
 ## Blockers

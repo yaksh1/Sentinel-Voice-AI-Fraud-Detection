@@ -23,6 +23,7 @@ from pipecat.transports.smallwebrtc.request_handler import (
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from sentinel_agent.pipeline import run_agent
+from sentinel_agent.tools import close_client
 
 # The Deepgram and Cartesia keys live in the repo-root .env (PLAN 0.2), and
 # uvicorn does not read it. Must happen before the pipeline reads os.environ.
@@ -48,6 +49,7 @@ async def lifespan(app: FastAPI):
     """Close any peer connections still open when the server stops."""
     yield
     await webrtc.close()
+    await close_client()
 
 
 app = FastAPI(title=SERVICE, lifespan=lifespan)

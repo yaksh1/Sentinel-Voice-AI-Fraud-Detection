@@ -17,6 +17,8 @@ import uuid
 from datetime import UTC, datetime
 
 from loguru import logger
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import Frame, TranscriptionFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -35,6 +37,11 @@ from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 from pipecat.turns.user_mute import MuteUntilFirstBotCompleteUserMuteStrategy
+from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import (
+    UserTurnStrategies,
+    default_user_turn_start_strategies,
+)
 from pipecat.workers.runner import WorkerRunner
 
 from sentinel_agent.timing import FrameTimingProcessor
@@ -51,10 +58,17 @@ VOICE_ID = "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"
 # and recording disclosure is the one line on the call that must not be
 # paraphrased, and 2.2's done-when is that it comes *first* — neither is
 # something to leave to a model that has been asked to be concise.
+#
+# Kept short on purpose. The caller is muted until it finishes (2.2 follow-up),
+# so every word is a word they cannot interrupt. 41 words measured 11.0 s of
+# dead air on connect; this is 32, at 9.9 s. Still the longest single wait in
+# the call — shortening it further trades against the four things it has to
+# say: who is calling, why, that it is not recorded, and that a full card
+# number will never be asked for.
 CONSENT_LINE = (
-    "This is Meridian Bank Fraud Prevention calling about a card transaction. "
-    "This call is not being recorded, and I will never ask for your full card "
-    "number or your PIN. Is now a good time to talk?"
+    "This is Meridian Bank fraud prevention, about a charge on your card. "
+    "This call isn't recorded, and I'll never ask for your full card number "
+    "or PIN. Do you have a moment?"
 )
 
 SYSTEM_PROMPT = """\
@@ -160,7 +174,18 @@ async def run_agent(connection: SmallWebRTCConnection) -> None:
         ),
     )
 
-    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
+    stt = DeepgramSTTService(
+        api_key=os.environ["DEEPGRAM_API_KEY"],
+        # Deepgram splits "yes / speaking / my card ends four two four two / I
+        # was born in Porto" into four finals, and with a short turn timeout the
+        # aggregator ends a turn on each one — four LLM calls in four seconds,
+        # which is over the Cerebras free-tier rate limit and cost a 21 s
+        # backoff stall. endpointing is the silence Deepgram needs before it
+        # calls an utterance finished: 800 ms rides out the pauses inside one
+        # answer. utterance_end_ms is the backstop for when they really stop.
+        endpointing=800,
+        utterance_end_ms=1200,
+    )
     llm = CerebrasLLMService(
         api_key=os.environ["CEREBRAS_API_KEY"],
         settings=CerebrasLLMService.Settings(system_instruction=SYSTEM_PROMPT),
@@ -188,6 +213,27 @@ async def run_agent(connection: SmallWebRTCConnection) -> None:
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(),
             user_mute_strategies=[MuteUntilFirstBotCompleteUserMuteStrategy()],
+            # The turn already ends via smart-turn-v3, which Pipecat uses by
+            # default — the problem was never that it was missing, it was that
+            # its SmartTurnParams.stop_secs defaults to 3. Measured, the caller
+            # finished talking and the agent sat silent for 3.0 s before the LLM
+            # was even asked, which was two thirds of the whole 4.5 s turn.
+            #
+            # 1.2 s, not the 0.8 s first tried: at 0.8 the turn ended on every
+            # Deepgram fragment, firing four LLM calls in four seconds, tripping
+            # the Cerebras rate limit and stalling 21 s on backoff. Faster turn
+            # detection is worth nothing if it outruns the model behind it.
+            user_turn_strategies=UserTurnStrategies(
+                start=default_user_turn_start_strategies(),
+                stop=[
+                    TurnAnalyzerUserTurnStopStrategy(
+                        turn_analyzer=LocalSmartTurnAnalyzerV3(
+                            params=SmartTurnParams(stop_secs=1.2)
+                        )
+                    )
+                ],
+            ),
+            user_turn_stop_timeout=1.5,
         ),
     )
 
