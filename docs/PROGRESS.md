@@ -568,6 +568,53 @@ is the same idea as the one Pipecat already ships, and migrating would mean
 rewriting the transport, the browser client and every processor. The two costs
 that actually hurt needed neither.
 
+### The "hold" was not a rate limit — it was interruption churn
+
+Reported as the agent going silent after about four turns, with Cerebras rate
+limiting as the suspected cause. It was not. **No 429 was ever logged**, and
+every request that produced a token produced it in 0.15–0.4 s. The real numbers
+from that browser session:
+
+| | |
+|---|---|
+| LLM requests | 28 |
+| First tokens produced | 9 |
+| Interruptions broadcast | **19** |
+
+Two thirds of the replies were cancelled before they generated a single word. An
+interruption cancels the in-flight LLM call, so from the caller's seat the agent
+simply stops answering.
+
+The usual cause is the agent's own voice returning through the caller's speakers,
+but a cough or an "mm" does it too — anything VAD hears while the bot is talking.
+Fixed with `MinWordsUserTurnStartStrategy(min_words=3)`, which gates
+interruptions on word count. The gate applies *only while the bot is speaking*
+(`min_words if bot_speaking else 1`), so a one-word "No." still answers normally
+— which matters, because "No." is the answer the whole call is built around. It
+replaces the VAD start strategy rather than joining it: VAD would go on starting
+turns on leaked audio whatever the word count said.
+
+### Two things that looked like bugs and were not
+
+**"I'm unable to release the hold on that transaction."** Correct. The tool
+returned `transaction is blocked, not held` — the tester had already run the deny
+path, so the transaction really was blocked. The agent said so plainly instead of
+claiming success, which is what the prompt asks of a failed tool call. The demo
+state needs resetting between a deny run and a confirm run.
+
+**Suspecting the rate limit.** Reasonable — it *had* bitten during 2.4
+calibration, and an earlier note in this file guessed it as the cause of a 21 s
+stall. That guess is still unproven and now looks less likely: the same session
+shows plenty of fast calls at the same request rate.
+
+### One that was a real defect
+
+*"Please stay on the line while I transfer…"* — the prompt already forbade
+transfers, and the model offered one anyway while escalating. The rule now names
+the specific phrasings (transferring, holding, staying on the line) and says what
+escalation actually means: an analyst reviews the case *after* the call, so the
+agent closes the call itself.
+
 ---
 
 ## Blockers

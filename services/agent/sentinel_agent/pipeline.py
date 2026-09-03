@@ -37,11 +37,9 @@ from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 from pipecat.turns.user_mute import MuteUntilFirstBotCompleteUserMuteStrategy
+from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
 from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
-from pipecat.turns.user_turn_strategies import (
-    UserTurnStrategies,
-    default_user_turn_start_strategies,
-)
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
 
 from sentinel_agent.timing import FrameTimingProcessor
@@ -223,8 +221,21 @@ async def run_agent(connection: SmallWebRTCConnection) -> None:
             # Deepgram fragment, firing four LLM calls in four seconds, tripping
             # the Cerebras rate limit and stalling 21 s on backoff. Faster turn
             # detection is worth nothing if it outruns the model behind it.
+            # Interruptions have to cost more than one stray syllable. Measured
+            # over a real browser call: 28 LLM requests, 9 first tokens, 19
+            # interruptions — most replies were cancelled before they produced a
+            # word, which the caller experiences as the agent going silent. The
+            # usual cause is the agent's own voice leaking back through
+            # speakers, but a cough or a "mm" does it too.
+            #
+            # This strategy only applies the word gate *while the bot is
+            # speaking* (`min_words if bot_speaking else 1`), so a one-word
+            # "No." still answers normally — which matters, because "No." is the
+            # answer the whole call is built around. It replaces the VAD start
+            # strategy rather than joining it: VAD would keep starting turns on
+            # leaked audio no matter what the word count said.
             user_turn_strategies=UserTurnStrategies(
-                start=default_user_turn_start_strategies(),
+                start=[MinWordsUserTurnStartStrategy(min_words=3)],
                 stop=[
                     TurnAnalyzerUserTurnStopStrategy(
                         turn_analyzer=LocalSmartTurnAnalyzerV3(
