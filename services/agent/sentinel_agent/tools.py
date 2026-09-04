@@ -70,10 +70,14 @@ async def _post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "error": "the banking system did not respond"}
 
 
-# Set by the pipeline for the life of one call. The handler cannot end the call
-# itself: at the moment `end_call` runs, the goodbye has not been generated yet —
-# the tool result is what prompts the model to say it. So the tool only arms, and
-# the pipeline hangs up once the agent has actually stopped speaking.
+# Set by the pipeline for the life of one call, and armed by the terminal tools
+# below rather than by the model.
+#
+# There was an `end_call` tool here. It was removed twice over: the model would
+# not call it when told to — it said "you may hang up" and left the line open —
+# and when it did reach for it, it emitted the arguments as *speech*, so the
+# caller heard `{ "reason": "completed_release" }` read out before the goodbye.
+# A tool the model misuses and does not need is pure downside.
 _hangup: Any = None
 
 
@@ -128,20 +132,6 @@ async def _block_card_and_reissue(params: FunctionCallParams) -> None:
     logger.info("tool block_card_and_reissue -> {}", result)
     _arm_if_final(result)
     await params.result_callback(result)
-
-
-async def _end_call(params: FunctionCallParams) -> None:
-    reason = str(params.arguments.get("reason", "conversation complete"))
-    logger.info("tool end_call -> arming hang-up ({})", reason)
-    if _hangup is not None:
-        _hangup.arm()
-    await params.result_callback(
-        {
-            "ok": True,
-            "ending": True,
-            "say": "Say your closing line now. Do not ask another question.",
-        }
-    )
 
 
 async def reset_demo() -> None:
@@ -210,18 +200,6 @@ TOOLS = [
         properties={"card_id": {"type": "string", "description": "From lookup_transaction."}},
         required=["card_id"],
         handler=_block_card_and_reissue,
-    ),
-    FunctionSchema(
-        name="end_call",
-        description=(
-            "Hang up. Call this once the matter is settled and you have nothing "
-            "further to do — after releasing or blocking, after escalating, or if "
-            "the caller says goodbye or asks you to stop. Say your closing line in "
-            "the same turn; the line stays open until you have finished speaking."
-        ),
-        properties={"reason": {"type": "string", "description": "Why the call is ending."}},
-        required=["reason"],
-        handler=_end_call,
     ),
     FunctionSchema(
         name="escalate_to_analyst",

@@ -646,7 +646,9 @@ successful `release_hold`, `block_card_and_reissue` or `escalate_to_analyst` arm
 it, because those are the three ways a call ends. `end_call` stays for a caller
 who says goodbye before any of them.
 
-**It has not been seen to fire end to end**, because of B13.
+**Verified end to end** on both paths: `call: agent hanging up` after
+`release_hold` and after `block_card_and_reissue`, with the closing line spoken
+in full first. B13 delayed seeing it, it did not prevent it.
 
 ### B13 · The LLM stalls after a tool result, and it is not the rate limit · **OPEN**
 
@@ -666,6 +668,35 @@ who says goodbye before any of them.
   is a ten-minute experiment, not a guess.
 - **Impact:** it is now the dominant latency problem, well above anything the
   turn-detection work addressed, and it blocks verifying the hang-up.
+
+### The agent read a tool call out loud
+
+Dogfooding: the caller heard `{ "reason": "completed_release" }` before the
+goodbye. The model emitted tool-call syntax as visible text and the TTS said it.
+The hang-up itself worked — the line dropped correctly.
+
+**`end_call` is gone.** It failed twice over: the model would not call it when
+told to, and when it did reach for it, it spoke the arguments. A tool the model
+misuses and does not need is pure downside — the hang-up is armed by the terminal
+tools, so nothing was lost by deleting it.
+
+**Removing it was not enough.** A later run with the tool gone still sent a bare
+`{` to the TTS, so the leak is the model's habit rather than that tool's.
+`Speakable` sits between the LLM and the TTS and strips `{`, `}`, `"` and `\`
+from anything heading for speech, dropping a fragment left with no letter or
+digit at all.
+
+It strips characters rather than dropping frames, and that detail is the whole
+reason the first attempt failed: the LLM streams `{` inside a larger chunk, and
+the TTS aggregator only splits it onto its own line afterwards. A frame-level
+filter never sees a frame that is *only* a brace. The first version of this guard
+was written that way, shipped, and did not catch the very next occurrence.
+
+**Honest limit:** a full `{"reason": "x"}` inside one chunk still comes out as
+"reason x" rather than being suppressed. Detecting that mid-stream without
+eating real speech is not something a character filter can do; the real fix is
+whatever stops the model emitting it, and removing the tool it was imitating is
+the best lead so far.
 
 ---
 

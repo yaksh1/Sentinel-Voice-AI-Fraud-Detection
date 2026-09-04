@@ -24,6 +24,8 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     EndWorkerFrame,
     Frame,
+    InterimTranscriptionFrame,
+    TextFrame,
     TranscriptionFrame,
     TTSSpeakFrame,
 )
@@ -154,6 +156,46 @@ class TranscriptLog(FrameProcessor):
 
         if isinstance(frame, TranscriptionFrame):
             logger.info("stt: {!r}", redact_pan(frame.text))
+
+
+class Speakable(FrameProcessor):
+    """Strip anything heading for the TTS that a voice cannot say.
+
+    A caller heard `{ "reason": "completed_release" }` read out before the
+    goodbye: the model emitted tool-call syntax as visible text and the TTS
+    dutifully said it. Removing the tool it was misusing did not stop it — the
+    braces came back on a run with that tool gone — so this is the fix that
+    actually holds.
+
+    It strips characters rather than dropping frames, because the LLM streams
+    `{` inside a larger chunk and the TTS aggregator only splits it onto its own
+    line later. By then the frame is out of reach; by here it is not.
+
+    Braces and backslashes are never speech in this domain. A fragment left with
+    no letter or digit at all is dropped entirely — `{` alone has nothing a
+    voice can do with it.
+    """
+
+    #: Characters that never belong in something spoken to a caller.
+    UNSPEAKABLE = str.maketrans("", "", '{}"\\')
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Forward every frame, with unspeakable characters removed from speech."""
+        await super().process_frame(frame, direction)
+
+        if (
+            isinstance(frame, TextFrame)
+            and not isinstance(frame, TranscriptionFrame | InterimTranscriptionFrame)
+            and frame.text
+        ):
+            cleaned = frame.text.translate(self.UNSPEAKABLE)
+            if cleaned != frame.text:
+                logger.warning("stripped unspeakable text before TTS: {!r}", frame.text)
+                if not any(c.isalnum() for c in cleaned):
+                    return
+                frame.text = cleaned
+
+        await self.push_frame(frame, direction)
 
 
 class HangUp(FrameProcessor):
@@ -295,6 +337,7 @@ async def run_agent(connection: SmallWebRTCConnection) -> None:
             TranscriptLog(),
             user_aggregator,
             llm,
+            Speakable(),
             tts,
             transport.output(),
             assistant_aggregator,
