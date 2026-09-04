@@ -698,6 +698,53 @@ eating real speech is not something a character filter can do; the real fix is
 whatever stops the model emitting it, and removing the tool it was imitating is
 the best lead so far.
 
+### Making it sound like a person (2026-09-03)
+
+Dogfooding verdict: *"the talk lacks the human touch"*. It was answering a piece
+of information with nothing but the next question, and after blocking a card it
+never said the one thing a frightened cardholder needs to hear.
+
+The old prompt asked for exactly that: *"calm, concise. One or two sentences per
+turn."* Optimising for brevity produced a form.
+
+| Before | After |
+|---|---|
+| "I have 42 as the last two digits. Can you provide the full four-digit ending?" | "Thank you, Alex, that matches what we have here." |
+| "The transaction is for nine hundred forty dollars at Lisboa Eletrónica." | "…was flagged and stopped before any money left your account." |
+| "Your card has been blocked and a replacement will be mailed." | "You're not liable for this charge." then the card, then the replacement |
+
+**`verify_challenge` now returns the caller's first name on a pass.** The agent
+had no way to learn who it was talking to, and a fraud call that never uses the
+cardholder's name sounds like a form no matter how the prompt is worded. Only on
+a pass: an unverified caller is not owed the name on the account.
+
+**The flow now says what to say, in what order, after a decision.** On a block:
+not liable first, then the card is stopped, then the replacement timeline, then
+ask if they have questions. Reassurance has an order and the model was not
+guessing it right.
+
+**A prompt edit that never landed.** The numbered call flow was supposed to have
+gone in with 2.5. The string replace that added it did not match, silently, and
+was never verified — the model had been working from tool descriptions alone
+this whole time. Rewritten with an editor rather than a fuzzy replace, and the
+prompt is now asserted for its own content before shipping.
+
+### The tool-call leak, second attempt
+
+Stripping braces was not enough: `name: lookup_transaction,` reached the caller
+with its punctuation removed. `Speakable` now drops any fragment containing a
+tool name outright — those are identifiers, never speech — before the character
+strip runs.
+
+### Known tradeoff: short answers cannot interrupt
+
+`MinWordsUserTurnStartStrategy(min_words=3)` stops leaked audio cancelling
+replies, but the gate counts words, so a caller saying just "Yes." *while the
+agent is still speaking* is ignored. Once the agent stops, one word is enough
+again. In a scripted probe that loses the answer; a real caller repeats
+themselves. Lower it to 2, or to 1, if barge-in matters more than the stability
+it bought.
+
 ---
 
 ## Blockers

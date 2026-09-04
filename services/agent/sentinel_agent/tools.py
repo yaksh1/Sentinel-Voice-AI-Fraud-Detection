@@ -159,7 +159,8 @@ TOOLS = [
         description=(
             "Check the caller's identity against the bank's records. Call this once "
             "the caller has given both the last four digits of their card and their "
-            "city of birth. Returns whether they passed."
+            "city of birth. Returns whether they passed, and on a pass their first "
+            "name, which you may use to address them."
         ),
         properties={
             "last4": {"type": "string", "description": "The last four digits of the card."},

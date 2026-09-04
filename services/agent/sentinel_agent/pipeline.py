@@ -86,14 +86,48 @@ did not call you, they are not a support caller, and they have no request for \
 you to handle. Never ask what they need, how you can help, or what their \
 concern is — you know why you called and it is your job to lead.
 
-Your immediate objective is to confirm you are speaking to the cardholder. Ask \
-for the last four digits of the card and their city of birth. Do not discuss \
-the transaction — the amount, the merchant, the time, the place — until that \
-is confirmed.
+How the call goes:
 
-Style: calm, concise, plain language. One or two sentences per turn. Your words \
-are spoken aloud, so never use markdown, lists, bullet points, emoji or \
-symbols, and write numbers the way you would say them.
+1. Confirm you are speaking to the cardholder. Ask for the last four digits of \
+the card and their city of birth, then call verify_challenge with both. Do not \
+discuss the transaction — the amount, the merchant, the time, the place — \
+before that passes.
+
+2. When it passes, say so before you move on: thank them, and tell them the \
+details match what the bank has. Then call lookup_transaction and describe what \
+was flagged — the amount, the merchant, roughly when — and say that it was \
+stopped before any money left the account.
+
+3. Ask whether they made it, and give them room to answer.
+   - If they did: call release_hold, tell them the payment will go through \
+normally, and apologise for interrupting their day.
+   - If they did not: call block_card_and_reissue, then reassure them in this \
+order — they are not liable for a charge they did not make, the card is stopped \
+so it cannot be used again, and a replacement is on its way within three to \
+five days. Ask whether they have any questions before you close.
+
+4. If verification fails twice, or they ask for a person, call \
+escalate_to_analyst.
+
+5. When the matter is settled, say one short closing line and stop. The line \
+hangs up on its own. Do not ask whether there is anything else, and never tell \
+the caller to hang up; you called them.
+
+Style: warm, calm, unhurried. You are talking to someone who may be worried \
+about their money, and possibly frightened, so sound like a person rather than \
+a form.
+
+Acknowledge what they just said before you move on — "thank you", "that matches \
+what we have here", "I understand" — and never answer a piece of information \
+with nothing but the next question. Two or three sentences a turn is right: \
+enough to sound human, not so much that they cannot get a word in.
+
+Once they are verified, use their first name occasionally — once or twice in \
+the call, not every turn.
+
+Your words are spoken aloud, so never use markdown, lists, bullet points, \
+emoji, symbols, braces or quotation marks, and write numbers the way you would \
+say them.
 
 Rules:
 - Never say a full card number. Refer to a card only by its last four digits.
@@ -171,13 +205,20 @@ class Speakable(FrameProcessor):
     `{` inside a larger chunk and the TTS aggregator only splits it onto its own
     line later. By then the frame is out of reach; by here it is not.
 
-    Braces and backslashes are never speech in this domain. A fragment left with
-    no letter or digit at all is dropped entirely — `{` alone has nothing a
-    voice can do with it.
+    Two rules, because stripping punctuation alone was not enough: a fragment
+    that survived as `name: lookup_transaction,` still reached the caller. So a
+    fragment naming any tool is dropped outright — those are identifiers, never
+    speech — and what is left has braces, quotes and backslashes removed, with
+    anything containing no letter or digit dropped as well.
     """
 
     #: Characters that never belong in something spoken to a caller.
     UNSPEAKABLE = str.maketrans("", "", '{}"\\')
+
+    #: The tool names. A caller should never hear "lookup_transaction" — these
+    #: are identifiers, never speech, so a fragment containing one is a leaking
+    #: tool call however much of its punctuation has already been stripped.
+    TOOL_NAMES = frozenset(tool.name for tool in TOOLS)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Forward every frame, with unspeakable characters removed from speech."""
@@ -188,6 +229,10 @@ class Speakable(FrameProcessor):
             and not isinstance(frame, TranscriptionFrame | InterimTranscriptionFrame)
             and frame.text
         ):
+            if any(name in frame.text for name in self.TOOL_NAMES):
+                logger.warning("dropped leaked tool call before TTS: {!r}", frame.text)
+                return
+
             cleaned = frame.text.translate(self.UNSPEAKABLE)
             if cleaned != frame.text:
                 logger.warning("stripped unspeakable text before TTS: {!r}", frame.text)

@@ -104,7 +104,9 @@ async def verify_challenge(req: VerifyChallenge) -> dict[str, Any]:
             if customer_id is None:
                 raise HTTPException(404, "no such call")
 
-        row = await conn.fetchrow("SELECT city_of_birth FROM customers WHERE id = $1", customer_id)
+        row = await conn.fetchrow(
+            "SELECT city_of_birth, display_name FROM customers WHERE id = $1", customer_id
+        )
         if row is None:
             raise HTTPException(404, "no such customer")
 
@@ -127,6 +129,12 @@ async def verify_challenge(req: VerifyChallenge) -> dict[str, Any]:
                 req.call_id,
             )
         result = {"passed": passed, "attempt": prior + 1}
+        if passed:
+            # The agent has no other way to learn who it is talking to, and a
+            # fraud call that never uses the cardholder's name sounds like a
+            # form. Only on a pass — an unverified caller is not owed the name
+            # on the account.
+            result["first_name"] = row["display_name"].split()[0]
 
         if passed and req.call_id is not None:
             await conn.execute(
