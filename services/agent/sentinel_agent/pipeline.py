@@ -12,6 +12,7 @@ arrives in 3.1, and the structured output it reads is specified in 2.7. Nothing
 below should grow into a substitute for it.
 """
 
+import asyncio
 import os
 import uuid
 from datetime import UTC, datetime
@@ -28,6 +29,7 @@ from pipecat.frames.frames import (
     TextFrame,
     TranscriptionFrame,
     TTSSpeakFrame,
+    UserStartedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -85,6 +87,9 @@ cardholder's account and you rang them to check whether it was genuine. They \
 did not call you, they are not a support caller, and they have no request for \
 you to handle. Never ask what they need, how you can help, or what their \
 concern is — you know why you called and it is your job to lead.
+
+Say "the card" or "your card", never "the card you are calling about" or "the \
+card this concerns". They are not calling about anything; you rang them.
 
 How the call goes:
 
@@ -244,32 +249,60 @@ class Speakable(FrameProcessor):
 
 
 class HangUp(FrameProcessor):
-    """End the call once the agent has finished saying goodbye.
+    """End the call once the business is done and nobody is still talking.
 
-    `end_call` cannot hang up on its own. When the tool runs, the closing line
-    does not exist yet — the tool result is what prompts the model to say it. So
-    the tool arms this, and this waits for the agent to actually stop speaking
-    before pushing `EndWorkerFrame`, which drains the pipeline rather than
-    cutting the goodbye off mid-word.
+    The terminal tools arm this; the model is not asked to hang up, because when
+    told to it said "you may hang up" and left the line open.
+
+    It does not end on the first silence. The first version did, and the agent
+    hung up immediately after asking "do you have any questions?" — a question it
+    never waited for the answer to, which is worse than not asking. So arming
+    only starts a grace period: the agent stops speaking, the clock runs, and the
+    caller talking resets it. Ending a call is saying goodbye, pausing, and then
+    hanging up, which is what a person does.
+
+    `EndWorkerFrame` rather than a hard disconnect, so queued audio drains and
+    the last words are not clipped.
     """
+
+    #: How long the line stays open after the agent's last word.
+    GRACE_SECS = 6.0
 
     def __init__(self):
         super().__init__()
         self._armed = False
+        self._countdown: asyncio.Task | None = None
 
     def arm(self) -> None:
-        """Hang up after the agent's next completed utterance."""
+        """Begin ending the call once the conversation goes quiet."""
         self._armed = True
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Forward every frame; end the call once the agent stops speaking."""
+        """Forward every frame; end the call after a quiet gap once armed."""
         await super().process_frame(frame, direction)
         await self.push_frame(frame, direction)
 
-        if self._armed and isinstance(frame, BotStoppedSpeakingFrame):
-            self._armed = False
-            logger.info("call: agent hanging up")
-            await self.push_frame(EndWorkerFrame(reason="agent ended the call"))
+        if not self._armed:
+            return
+
+        if isinstance(frame, UserStartedSpeakingFrame):
+            # They had something more to say. The agent will answer and stop
+            # again, which restarts the clock below.
+            self._cancel_countdown()
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            self._cancel_countdown()
+            self._countdown = self.create_task(self._hang_up_after_silence(), name="hangup")
+
+    async def _hang_up_after_silence(self) -> None:
+        await asyncio.sleep(self.GRACE_SECS)
+        self._armed = False
+        logger.info("call: agent hanging up after {}s of quiet", self.GRACE_SECS)
+        await self.push_frame(EndWorkerFrame(reason="agent ended the call"))
+
+    def _cancel_countdown(self) -> None:
+        if self._countdown is not None:
+            self._countdown.cancel()
+            self._countdown = None
 
 
 async def run_agent(connection: SmallWebRTCConnection) -> None:

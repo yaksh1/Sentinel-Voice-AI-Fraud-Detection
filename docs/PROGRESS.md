@@ -745,6 +745,43 @@ again. In a scripted probe that loses the answer; a real caller repeats
 themselves. Lower it to 2, or to 1, if barge-in matters more than the stability
 it bought.
 
+### Two more from dogfooding, and what they revealed
+
+**"the card you're calling about."** The prompt said the agent placed the call;
+it never banned the phrasing that implies otherwise. Naming the exact wrong
+words — say "your card", never "the card you are calling about" — is the third
+time a general instruction has needed a specific phrase attached before it held.
+
+**It asked "do you have any questions?" and hung up.** Mine. The hang-up ended
+the call on the *first* silence after a terminal tool, and the agent's closing
+turn ends with that question, so it dropped the line without waiting for the
+answer. Asking a question you do not wait for is worse than not asking.
+
+`HangUp` now arms a **6 second grace period** instead: the agent stops speaking,
+the clock runs, and the caller speaking cancels it. Ending a call is saying
+goodbye, pausing, then hanging up. Verified: `agent hanging up after 6.0s of
+quiet`.
+
+**And the thing underneath both.** The same run shows the agent blocking the card
+*before* asking whether the caller made the purchase — which reads as a serious
+sequencing bug and is not one. The timeline:
+
+```
+22:40:02  caller finishes verifying
+          ...23 seconds of nothing...
+22:40:25  caller denies the charge (the probe's next cue)
+22:40:27  verify_challenge
+22:40:29  lookup_transaction
+22:40:29  block_card_and_reissue
+22:40:30  "You did not make this purchase, correct?"
+```
+
+B13 stalled the reply to the verification for 23 s. By the time the model ran,
+its context held both the verification *and* the denial, so it did everything at
+once and asked the question afterwards. **B13 is no longer just a latency bug —
+it reorders the conversation**, and it is now the most damaging open problem in
+the project.
+
 ---
 
 ## Blockers
